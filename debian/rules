@@ -1,0 +1,69 @@
+#!/usr/bin/make -f
+# -*- makefile -*-
+
+# Uncomment this to turn on verbose mode.
+#export DH_VERBOSE=1
+
+build: build-stamp
+build-stamp:
+	dh_testdir
+
+	# Add here commands to compile the package.
+	python setup.py build
+	debian_bundle/doc-debtags > README.debtags
+
+	touch $@
+
+clean:
+	dh_testdir
+	dh_testroot
+	rm -f build-stamp
+
+	# Add here commands to clean up after the build process.
+	python setup.py clean
+	rm -rf build/
+	rm -f README.debtags
+
+	dh_clean
+
+install: build
+	dh_testdir
+	dh_testroot
+	dh_clean
+	dh_installdirs
+
+	# Add here commands to install the package into debian/tmp
+	python setup.py install --root=$(CURDIR)/debian/python-debian --no-compile
+
+
+# Build architecture-independent files here.
+binary-indep: build install
+	dh_testdir
+	dh_testroot
+	dh_installchangelogs
+	dh_installdocs
+	dh_installexamples
+	# TODO: Enrico would like to keep wxssearch out of the package
+	# but so far, he has no better place for it
+	#rm $(CURDIR)/debian/python-debian/usr/share/doc/python-debian/examples/wxssearch
+	#rm $(CURDIR)/debian/python-debian/usr/share/doc/python-debian/examples/debtags/wxssearch
+	#TODO: there is a python-deb822 package so don't provide deb822.py for now,
+	# at lest until we discuss it.
+	rm $(CURDIR)/debian/python-debian/usr/lib/python2.4/site-packages/debian_bundle/deb822.py
+	rm $(CURDIR)/debian/python-debian/usr/lib/python2.4/site-packages/debian_bundle/test_deb822.py
+#	dh_install
+	dh_compress -Xexamples
+	dh_fixperms
+	dh_pysupport -d
+	dh_installdeb
+	dh_shlibdeps
+	dh_gencontrol
+	dh_md5sums
+	dh_builddeb
+
+# Build architecture-dependent files here.
+binary-arch: build install
+# We have nothing to do by default.
+
+binary: binary-indep binary-arch
+.PHONY: build clean binary-indep binary-arch binary install
