@@ -11,7 +11,7 @@ gnutls13 (1:1.4.1-1) unstable; urgency=low
 
  -- Andreas Metzler <ametzler@debian.org>  Sat, 15 Jul 2006 11:11:08 +0200
 
-gnutls13 (1.4.0-3) unstable; urgency=low
+gnutls13 (1.4aA.0-3) unstable; urgency=low
 
   [ Andreas Metzler ]
   * Strip "libgnutls-config --libs"' output to only list stuff required for
@@ -152,7 +152,7 @@ gnutls12 (1.2.5-1) unstable; urgency=low
     - Changed the library version strings to GNUTLS_1_2.
     - Renamed the development package back to "libgnutls-dev".
 
- -- Matthias Urlichs <smurf@debian.org>  Tue,  5 Jul 2005 10:35:56 +0200
+ -- Matthias Urlichs <smurf@debian.org>  Tue, 5 Jul 2005 10:35:56 +0200
 
 gnutls11 (1.0.19-1) experimental; urgency=low
 

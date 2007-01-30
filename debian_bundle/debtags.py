@@ -18,35 +18,36 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #
 
-# TODO: install python-epydoc and try to autogenerate documntation from that
+import math, re
 
-import math
+def parseTags(input):
+	lre = re.compile(r"^(.+?)(?::?\s*|:\s+(.+?)\s*)$")
+	for line in input:
+		# Is there a way to remove the last character of a line that does not
+		# make a copy of the entire line?
+		m = lre.match(line)
+		pkgs = set(m.group(1).split(', '))
+		if m.group(2):
+			tags = set(m.group(2).split(', '))
+		else:
+			tags = set()
+		yield pkgs, tags
 
 def readTagDatabase(input):
 	"Read the tag database, returning a pkg->tags dictionary"
 	db = {}
-	for line in input:
-		# Is there a way to remove the last character of a line that does not
-		# make a copy of the entire line?
-		line = line.rstrip("\n")
-		pkgs, tags = line.split(": ")
+	for pkgs, tags in parseTags(input):
 		# Create the tag set using the native set
-		tags = set(tags.split(", "))
-		for p in pkgs.split(", "):
+		for p in pkgs:
 			db[p] = tags.copy()
 	return db;
 
 def readTagDatabaseReversed(input):
 	"Read the tag database, returning a tag->pkgs dictionary"
 	db = {}
-	for line in input:
-		# Is there a way to remove the last character of a line that does not
-		# make a copy of the entire line?
-		line = line.rstrip("\n")
-		pkgs, tags = line.split(": ")
+	for pkgs, tags in parseTags(input):
 		# Create the tag set using the native set
-		pkgs = set(pkgs.split(", "))
-		for tag in tags.split(", "):
+		for tag in tags:
 			if db.has_key(tag):
 				db[tag] |= pkgs
 			else:
@@ -57,17 +58,12 @@ def readTagDatabaseBothWays(input, tagFilter = None):
 	"Read the tag database, returning a pkg->tags and a tag->pkgs dictionary"
 	db = {}
 	dbr = {}
-	for line in input:
-		# Is there a way to remove the last character of a line that does not
-		# make a copy of the entire line?
-		line = line.rstrip("\n")
-		pkgs, tags = line.split(": ")
+	for pkgs, tags in parseTags(input):
 		# Create the tag set using the native set
-		pkgs = set(pkgs.split(", "))
 		if tagFilter == None:
-			tags = set(tags.split(", "))
+			tags = set(tags)
 		else:
-			tags = set(filter(tagFilter, tags.split(', ')))
+			tags = set(filter(tagFilter, tags))
 		for pkg in pkgs:
 			db[pkg] = tags.copy()
 		for tag in tags:
@@ -170,10 +166,32 @@ class DB:
 		res.rdb = self.db
 		return res
 
+	def facetCollection(self):
+		"""
+		Return a copy of this collection, but replaces the tag names
+		with only their facets.
+		"""
+		fcoll = DB()
+		tofacet = re.compile(r"^([^:]+).+")
+		for pkg, tags in self.iterPackagesTags():
+			ftags = set([tofacet.sub(r"\1", t) for t in tags])
+			fcoll.insert(pkg, ftags)
+		return fcoll
+
+	def copy(self):
+		"""
+		Return a copy of this collection, with the tagsets copied as
+		well.
+		"""
+		res = DB()
+		res.db = self.db.copy()
+		res.rdb = self.rdb.copy()
+		return res
+
 	def reverseCopy(self):
 		"""
 		Return the reverse collection, with a copy of the tagsets of
-		this one
+		this one.
 		"""
 		res = DB()
 		res.db = self.rdb.copy()
@@ -209,7 +227,8 @@ class DB:
 	def filterPackages(self, packageFilter):
 		"""
 		Return a collection with only those packages that match a
-		filter, sharing tagsets with this one
+		filter, sharing tagsets with this one.  The filter will match
+		on the package.
 		"""
 		res = DB()
 		db = {}
@@ -222,7 +241,8 @@ class DB:
 	def filterPackagesCopy(self, filter):
 		"""
 		Return a collection with only those packages that match a
-		filter, with a copy of the tagsets of this one
+		filter, with a copy of the tagsets of this one.  The filter
+		will match on the package.
 		"""
 		res = DB()
 		db = {}
@@ -230,6 +250,62 @@ class DB:
 			db[pkg] = self.db[pkg].copy()
 		res.db = db
 		res.rdb = reverse(db)
+		return res
+
+	def filterPackagesTags(self, packageTagFilter):
+		"""
+		Return a collection with only those packages that match a
+		filter, sharing tagsets with this one.  The filter will match
+		on (package, tags).
+		"""
+		res = DB()
+		db = {}
+		for pkg, tags in filter(packageTagFilter, self.db.iteritems()):
+			db[pkg] = self.db[pkg]
+		res.db = db
+		res.rdb = reverse(db)
+		return res
+
+	def filterPackagesTagsCopy(self, packageTagFilter):
+		"""
+		Return a collection with only those packages that match a
+		filter, with a copy of the tagsets of this one.  The filter
+		will match on (package, tags).
+		"""
+		res = DB()
+		db = {}
+		for pkg, tags in filter(packageTagFilter, self.db.iteritems()):
+			db[pkg] = self.db[pkg].copy()
+		res.db = db
+		res.rdb = reverse(db)
+		return res
+
+	def filterTags(self, tagFilter):
+		"""
+		Return a collection with only those tags that match a
+		filter, sharing package sets with this one.  The filter will match
+		on the tag.
+		"""
+		res = DB()
+		rdb = {}
+		for tag in filter(tagFilter, self.rdb.iterkeys()):
+			rdb[tag] = self.rdb[tag]
+		res.rdb = rdb
+		res.db = reverse(rdb)
+		return res
+
+	def filterTagsCopy(self, tagFilter):
+		"""
+		Return a collection with only those tags that match a
+		filter, with a copy of the package sets of this one.  The
+		filter will match on the tag.
+		"""
+		res = DB()
+		rdb = {}
+		for tag in filter(tagFilter, self.rdb.iterkeys()):
+			rdb[tag] = self.rdb[tag].copy()
+		res.rdb = rdb
+		res.db = reverse(rdb)
 		return res
 
 	def hasPackage(self, pkg):
@@ -346,3 +422,19 @@ class DB:
 			return set(tags[:1])
 		else:
 			return tagset
+
+	def correlations(self):
+		"""
+		Generate the list of correlation as a tuple (hastag, hasalsotag, score).
+
+		Every touple will indicate that the tag 'hastag' tends to also
+		have 'hasalsotag' with a score of 'score'.
+		"""
+		for pivot in self.iterTags():
+			with = self.filterPackagesTags(lambda pt: pivot in pt[1])
+			without = self.filterPackagesTags(lambda pt: pivot not in pt[1])
+			for tag in with.iterTags():
+				if tag == pivot: continue
+				has = float(with.card(tag)) / float(with.packageCount())
+				hasnt = float(without.card(tag)) / float(without.packageCount())
+				yield pivot, tag, has - hasnt
