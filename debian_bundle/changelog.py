@@ -184,8 +184,8 @@ topline = re.compile('^([a-z0-9][-a-z0-9.+]+) \(([-0-9a-zA-Z.:~+]+)\) '
       +'([-a-zA-Z ]+); urgency=([a-z]+)')
 blankline = re.compile('^[ \t]*$')
 change = re.compile('^[ ][ ]+.*$')
-endline = re.compile('^ -- (.*)  (\w\w\w, (\d| \d|\d\d) \w\w\w \d\d\d\d '+
-      '\d\d:\d\d:\d\d [-+]\d\d\d\d( \(.*\))?)$')
+endline = re.compile('^ -- (.*)  (\w\w\w, +(\d| \d|\d\d) \w\w\w \d\d\d\d '+
+      '\d\d:\d\d:\d\d [-+]\d\d\d\d( \(.*\))?)\s*$')
 
 class Changelog(object):
   """Represents a debian/changelog file. You can ask it several things about
@@ -392,6 +392,11 @@ class ChangelogTests(unittest.TestCase):
       self.assertEqual(clines[i], cslines[i])
     self.assertEqual(len(clines), len(cslines), "Different lengths")
 
+  def test_strange_changelogs(self):
+    """ Just opens and parses a strange changelog """
+    c = open('test_strange_changelog').read()
+    cl = Changelog(c)
+
   def test_set_version_with_string(self):
     c1 = Changelog(open('test_modify_changelog1').read())
     c2 = Changelog(open('test_modify_changelog1').read())
@@ -449,12 +454,17 @@ class VersionTests(unittest.TestCase):
     self._test_version('20060611-0.0', None, '20060611', '0.0')
     self._test_version('0.52.2-5.1', None, '0.52.2', '5.1')
     self._test_version('7.0-035+1', None, '7.0', '035+1')
-    self._test_version('1.1.0+cvs20060620-1+2.6.15-8', None, 
+    self._test_version('1.1.0+cvs20060620-1+2.6.15-8', None,
         '1.1.0+cvs20060620-1+2.6.15', '8')
-    self._test_version('1.1.0+cvs20060620-1+1.0', None, '1.1.0+cvs20060620', '1+1.0')
-    self._test_version('4.2.0a+stable-2sarge1', None, '4.2.0a+stable', '2sarge1')
+    self._test_version('1.1.0+cvs20060620-1+1.0', None, '1.1.0+cvs20060620',
+                       '1+1.0')
+    self._test_version('4.2.0a+stable-2sarge1', None, '4.2.0a+stable',
+                       '2sarge1')
     self._test_version('1.8RC4b', None, '1.8RC4b', None)
     self._test_version('0.9~rc1-1', None, '0.9~rc1', '1')
+    self._test_version('2:1.0.4+svn26-1ubuntu1', '2', '1.0.4+svn26',
+                       '1ubuntu1')
+    self._test_version('2:1.0.4~rc2-1', '2', '1.0.4~rc2', '1')
 
   def test_version_updating(self):
     v = Version('1:1.4.1-1')
