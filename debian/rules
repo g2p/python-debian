@@ -4,22 +4,29 @@
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
 
+VERSION := $(shell dpkg-parsechangelog | grep '^Version: ' | awk '{print $$2}')
+
+%.py: %.py.in
+	sed -e 's/__CHANGELOG_VERSION__/$(VERSION)/' < $< > $@
+
 build: build-stamp
-build-stamp:
+build-stamp: setup.py
 	dh_testdir
 
 	# Add here commands to compile the package.
 	python setup.py build
 	# The tests for changelog and debtags need to be run from the same dir as
 	# the files.
+	cd debian_bundle && python test_deb822.py
 	cd debian_bundle && python test_debtags.py
 	cd debian_bundle && python changelog.py
+	cd debian_bundle && python test_debfile.py
 	#python debian_bundle/python_support.py
 	debian_bundle/doc-debtags > README.debtags
 
 	touch $@
 
-clean:
+clean: setup.py
 	dh_testdir
 	dh_testroot
 	rm -f build-stamp
@@ -28,6 +35,7 @@ clean:
 	python setup.py clean
 	rm -rf build/
 	rm -f README.debtags
+	rm -f setup.py
 
 	dh_clean
 
@@ -52,10 +60,6 @@ binary-indep: build install
 	# but so far, he has no better place for it
 	#rm "$(CURDIR)/debian/python-debian/usr/share/doc/python-debian/examples/wxssearch"
 	rm "$(CURDIR)/debian/python-debian/usr/share/doc/python-debian/examples/debtags/wxssearch"
-	#TODO: there is a python-deb822 package so don't provide deb822.py for now,
-	# at lest until we discuss it.
-	rm "$(CURDIR)/debian/python-debian/usr/lib/python2.4/site-packages/debian_bundle/deb822.py"
-	rm "$(CURDIR)/debian/python-debian/usr/lib/python2.4/site-packages/debian_bundle/test_deb822.py"
 #	dh_install
 	dh_compress -Xexamples
 	dh_fixperms

@@ -159,7 +159,7 @@ class PackageFile:
     Objects of this class can be used to read Debian's Source and
     Packages files."""
 
-    re_field = re.compile(r'^([A-Za-z][A-Za-z0-9-]+):(?:\s+(.*?))?\s*$')
+    re_field = re.compile(r'^([A-Za-z][A-Za-z0-9-]+):(?:\s*(.*?))?\s*$')
     re_continuation = re.compile(r'^\s+(?:\.|(\S.*?)\s*)$')
 
     def __init__(self, name, fileObj=None):
@@ -206,9 +206,9 @@ class PackageFile:
                     contents = "%s\n%s" % (contents, ncontents)
                 else:
                     break
-            pkg.append((name, contents))
+            pkg.append((name.lower(), contents))
         if pkg:
-            yield pkg
+            yield dict(pkg)
 
     def raiseSyntaxError(self, msg, lineno=None):
         if lineno is None:
