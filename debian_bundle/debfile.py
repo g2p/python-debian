@@ -154,7 +154,11 @@ class DebControl(DebPart):
 
     def md5sums(self):
         """ Return a dictionary mapping filenames (of the data part) to
-        md5sums. Fails if the control part does not contain a 'md5sum' file. """
+        md5sums. Fails if the control part does not contain a 'md5sum' file.
+
+        Keys of the returned dictionary are the left-hand side values of lines
+        in the md5sums member of control.tar.gz, usually file names relative to
+        the file system root (without heading '/' or './'). """
 
         if not self.has_file(MD5_FILE):
             raise DebError("'%s' file not found, can't list MD5 sums" %
@@ -162,8 +166,9 @@ class DebControl(DebPart):
 
         md5_file = self.get_file(MD5_FILE)
         sums = {}
-        for line in md5_file:
-            md5, fname = line.split()
+        for line in md5_file.readlines():
+            # we need to support spaces in filenames, .split() is not enough
+            md5, fname = line.rstrip('\r\n').split(None, 1)
             sums[fname] = md5
         md5_file.close()
         return sums
@@ -219,7 +224,7 @@ class DebFile(ArFile):
 
     def md5sums(self):
         """ See .control.md5sums() """
-        return self.control.md5sums
+        return self.control.md5sums()
 
     def changelog(self):
         """ Return a Changelog object for the changelog.Debian.gz of the

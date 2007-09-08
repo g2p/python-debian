@@ -1,3 +1,21 @@
+python-debian (0.1.6) unstable; urgency=low
+
+  [ Stefano Zacchiroli ]
+  * debfile.py
+    - bugfix: make md5sums top-level method acts as a proxy instead of
+      returning a method
+    - bugfix: use readlines() to iterate over the md5sums file since direct
+      iteration on files is available only in python >= 2.5 (closes: #438804)
+    - bugfix: support spaces in filenames when accessing md5sums; thanks to
+      Romain Francoise for the patch (closes: #438909)
+
+  [ John Wright ]
+  * debian/pyversions:
+    - Since there are some Python 2.4-isms in this package, support only Python
+      >= 2.4, rather than all versions (Closes: #438920)
+
+ -- Stefano Zacchiroli <zack@debian.org>  Sat, 08 Sep 2007 10:12:20 +0200
+
 python-debian (0.1.5) unstable; urgency=low
 
   [ Stefano Zacchiroli ]
