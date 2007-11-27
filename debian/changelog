@@ -1,3 +1,23 @@
+python-debian (0.1.7) unstable; urgency=low
+
+  [ John Wright ]
+  * debian_bundle/deb822.py, debian_bundle/test_deb822.py
+    - Bug fix: Allow fields with blank (empty string) values.  Previously,
+      these were parsed fine, but if you tried to dump the resulting Deb822
+      object, you'd get an IndexError (because of how we handled fields whose
+      values start with newlines).  Added a test case.
+    - Fix the copy method of Deb822Dict so that it returns an object of the
+      same type, rather than explicitly instantiating Deb822Dict (so that
+      subclasses like Deb822 can directly use the copy method and have it "just
+      work").  Added a test case.
+
+  [ Stefano Zacchiroli ]
+  * debian/control
+    - mention the debfile module in the long description
+    - promote Vcs-Bzr to a real field, now that dpkg supports it
+
+ -- John Wright <jsw@debian.org>  Tue, 27 Nov 2007 16:25:33 -0700
+
 python-debian (0.1.6) unstable; urgency=low
 
   [ Stefano Zacchiroli ]

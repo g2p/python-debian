@@ -412,7 +412,34 @@ Description: python modules to work with Debian-related data formats
                              "Multiline fields that do not start with newline "
                              "should have a space between the colon and the "
                              "beginning of the value")
+
+    def test_blank_value(self):
+        """Fields with blank values are parsable--so they should be dumpable"""
+
+        d = deb822.Deb822()
+        d['Foo'] = 'bar'
+        d['Baz'] = ''
+        d['Another-Key'] = 'another value'
         
+        # Previous versions would raise an exception here -- this makes the
+        # test fail and gives useful information, so I won't try to wrap around
+        # it.
+        dumped = d.dump()
+        
+        # May as well make sure the resulting string is what we want
+        expected = "Foo: bar\nBaz:\nAnother-Key: another value\n"
+        self.assertEqual(dumped, expected)
+
+    def test_copy(self):
+        """The copy method of Deb822 should return another Deb822 object"""
+        d = deb822.Deb822()
+        d['Foo'] = 'bar'
+        d['Bar'] = 'baz'
+        d_copy = d.copy()
+
+        self.assert_(isinstance(d_copy, deb822.Deb822))
+        expected_dump = "Foo: bar\nBar: baz\n"
+        self.assertEqual(d_copy.dump(), expected_dump)
 
 if __name__ == '__main__':
     unittest.main()
