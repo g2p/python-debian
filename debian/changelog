@@ -1,3 +1,25 @@
+python-debian (0.1.10) unstable; urgency=low
+
+  * debian_bundle/deb822.py, tests/test_deb822.py:
+    - Do not cache _CaseInsensitiveString objects, since it causes case
+      preservation issues under certain circumstances (Closes: #473254)
+    - Add a test case
+  * debian_bundle/deb822.py:
+    - Add support for fixed-length subfields in multivalued fields.  I updated
+      the Release and PdiffIndex classes to use this.  The default behavior for
+      Release is that of apt-ftparchive, just because it's simpler.  Changing
+      the behavior to resemble dak requires simply setting the
+      size_field_behavior attribute to 'dak'.  (Ideally, deb822 would detect
+      which behavior to use if given an actual Release file as input, but this
+      is not implemented yet.)  (Closes: #473259)
+    - Add support for Checksums-{Sha1,Sha256} multivalued fields in Dsc and
+      Changes classes
+  * debian/control:
+    - "python" --> "Python" in the Description field
+    - Change the section to "python"
+
+ -- John Wright <jsw@debian.org>  Wed, 30 Apr 2008 23:58:24 -0600
+
 python-debian (0.1.9) unstable; urgency=low
 
   * Promote python-apt from Suggests to Recommends. (Closes: #462845)
