@@ -1,3 +1,43 @@
+python-debian (0.1.11) unstable; urgency=low
+
+  [ James Westby ]
+  * Allow urgency=HIGH and other words made of capital letters there, see
+    fuse's changelog.
+  * Allow any number of spaces before "urgency" in the header line of a
+    changelog, see lvm2's changelog in Ubuntu.
+  * Overhaul the parsing code to follow that used by dpkg-parsechangelog.py,
+    making it much more robust.
+    - There is now a "strict" option to turn warnings in to errors. It is
+      on by default.
+  * The file parameter in the changelog can now be a file-like object,
+    to save reading a file to a string first. Thanks to Tilman Koschnick.
+    (Closes: #487797)
+
+  [ John Wright ]
+  * debian/control:
+    - Fix a typo in the Description field (Closes: #483688)
+  * debian_bundle/deb822.py: Checksums-Sha1 and Checksums-Sha256 don't have
+    section or priority subfields (Closes: #487902)
+
+  [ Stefano Zacchiroli ]
+  * debian_bundle/deb822.py: add support for "parsed" dependencies and other
+    inter-package relationships. See examples/deb822/depgraph for sample usage
+  * examples/deb822/ add new example "depgraph"
+  * tests/test_deb822.py: add tests for inter-package relationships
+  * debian_bundle/debfile.py: add has_key (same implementation of
+    __contains__) to better emulate dictionary containers
+  * minor revamp of README pointing to deb822.py for Packages parsing and
+    mentioning debfile.py
+  * debian/control:
+    - fix Vcs-* fields to point to the new git repository (bzr is gone)
+  * bump Standards-Version to 3.8.0, no changes needed though profit of the
+    possibility of wrapping Uploaders in debian/control
+
+  [ Filippo Giunchedi ]
+  * Add test case for changes file with checksums (see #487902)
+
+ -- Stefano Zacchiroli <zack@debian.org>  Wed, 06 Aug 2008 23:48:38 -0300
+
 python-debian (0.1.10) unstable; urgency=low
 
   * debian_bundle/deb822.py, tests/test_deb822.py:

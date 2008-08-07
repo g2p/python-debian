@@ -2,11 +2,17 @@ Source: python-debian
 Section: python
 Priority: optional
 Maintainer: Debian python-debian Maintainers <pkg-python-debian-maint@lists.alioth.debian.org>
-Uploaders: Adeodato Simó <dato@net.com.org.es>, Enrico Zini <enrico@debian.org>, James Westby <jw+debian@jameswestby.net>, Reinhard Tartler <siretart@tauware.de>, Stefano Zacchiroli <zack@debian.org>, John Wright <jsw@debian.org>
+Uploaders: Adeodato Simó <dato@net.com.org.es>,
+ Enrico Zini <enrico@debian.org>,
+ James Westby <jw+debian@jameswestby.net>,
+ Reinhard Tartler <siretart@tauware.de>,
+ Stefano Zacchiroli <zack@debian.org>,
+ John Wright <jsw@debian.org>
 Build-Depends: debhelper (>= 5.0.37.2), python
 Build-Depends-Indep: python-support (>= 0.3)
-Standards-Version: 3.7.3
-Vcs-Bzr: http://bzr.debian.org/pkg-python-debian/trunk/
+Standards-Version: 3.8.0
+Vcs-Browser: http://git.debian.org/?p=pkg-python-debian/python-debian.git
+Vcs-Git: git://git.debian.org/git/pkg-python-debian/python-debian.git
 
 Package: python-debian
 Architecture: all
@@ -21,7 +27,7 @@ Description: Python modules to work with Debian-related data formats
   * Debtags information (debian_bundle.debtags module)
   * debian/changelog (debian_bundle.changelog module)
   * Packages files, pdiffs (debian_bundle.debian_support module)
-  * Control files of single or multple RFC822-style paragraphs, e.g
+  * Control files of single or multiple RFC822-style paragraphs, e.g.
     debian/control, .changes, .dsc, Packages, Sources, Release, etc.
     (debian_bundle.deb822 module)
   * Raw .deb and .ar files, with (read-only) access to contained

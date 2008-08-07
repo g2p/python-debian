@@ -172,6 +172,53 @@ Files:
  8960459940314b21019dedd5519b47a5 168544 python optional bzr-gtk_0.93.0-2_all.deb
 '''
 
+CHECKSUM_CHANGES_FILE = '''\
+Format: 1.8
+Date: Wed, 30 Apr 2008 23:58:24 -0600
+Source: python-debian
+Binary: python-debian
+Architecture: source all
+Version: 0.1.10
+Distribution: unstable
+Urgency: low
+Maintainer: Debian python-debian Maintainers <pkg-python-debian-maint@lists.alioth.debian.org>
+Changed-By: John Wright <jsw@debian.org>
+Description:
+ python-debian - Python modules to work with Debian-related data formats
+Closes: 473254 473259
+Changes:
+ python-debian (0.1.10) unstable; urgency=low
+ .
+   * debian_bundle/deb822.py, tests/test_deb822.py:
+     - Do not cache _CaseInsensitiveString objects, since it causes case
+       preservation issues under certain circumstances (Closes: #473254)
+     - Add a test case
+   * debian_bundle/deb822.py:
+     - Add support for fixed-length subfields in multivalued fields.  I updated
+       the Release and PdiffIndex classes to use this.  The default behavior for
+       Release is that of apt-ftparchive, just because it's simpler.  Changing
+       the behavior to resemble dak requires simply setting the
+       size_field_behavior attribute to 'dak'.  (Ideally, deb822 would detect
+       which behavior to use if given an actual Release file as input, but this
+       is not implemented yet.)  (Closes: #473259)
+     - Add support for Checksums-{Sha1,Sha256} multivalued fields in Dsc and
+       Changes classes
+   * debian/control:
+     - "python" --> "Python" in the Description field
+     - Change the section to "python"
+Checksums-Sha1:
+ d12d7c95563397ec37c0d877486367b409d849f5 1117 python-debian_0.1.10.dsc
+ 19efe23f688fb7f2b20f33d563146330064ab1fa 109573 python-debian_0.1.10.tar.gz
+ 22ff71048921a788ad9d90f9579c6667e6b3de3a 44260 python-debian_0.1.10_all.deb
+Checksums-Sha256:
+ aae63dfb18190558af8e71118813dd6a11157c6fd92fdc9b5c3ac370daefe5e1 1117 python-debian_0.1.10.dsc
+ d297c07395ffa0c4a35932b58e9c2be541e8a91a83ce762d82a8474c4fc96139 109573 python-debian_0.1.10.tar.gz
+ 4c73727b6438d9ba60aeb5e314e2d8523f021da508405dc54317ad2b392834ee 44260 python-debian_0.1.10_all.deb
+Files:
+ 469202dfd24d55a932af717c6377ee59 1117 python optional python-debian_0.1.10.dsc
+ 4857552b0156fdd4fa99d21ec131d3d2 109573 python optional python-debian_0.1.10.tar.gz
+ 81864d535c326c082de3763969c18be6 44260 python optional python-debian_0.1.10_all.deb
+'''
 
 class TestDeb822Dict(unittest.TestCase):
     def make_dict(self):
@@ -464,6 +511,11 @@ Description: python modules to work with Debian-related data formats
         changesobj = deb822.Changes(CHANGES_FILE.splitlines())
         self.assertEqual(CHANGES_FILE, changesobj.dump())
 
+    def test_bug487902_multivalued_checksums(self):
+        """New multivalued field Checksums was not handled correctly, see #487902."""
+        changesobj = deb822.Changes(CHECKSUM_CHANGES_FILE.splitlines())
+        self.assertEqual(CHECKSUM_CHANGES_FILE, changesobj.dump())
+
     def test_case_preserved_in_input(self):
         """The field case in the output from dump() should be the same as the
         input, even if multiple Deb822 objects have been created using
@@ -483,6 +535,104 @@ Description: python modules to work with Debian-related data formats
         if not d3.has_key('some-test-key'):
             d3['Some-Test-Key'] = 'some value'
         self.assertEqual(d3.dump(), "Some-Test-Key: some value\n")
+
+
+class TestPkgRelations(unittest.TestCase):
+
+    def test_packages(self):
+        pkgs = deb822.Packages.iter_paragraphs(file('test_Packages'))
+        pkg1 = pkgs.next()
+        rel1 = {'breaks': [],
+                'conflicts': [],
+                'depends': [[{'name': 'file', 'version': None, 'arch': None}],
+                    [{'name': 'libc6', 'version': ('>=', '2.7-1'), 'arch': None}],
+                    [{'name': 'libpaper1', 'version': None, 'arch': None}],
+                    [{'name': 'psutils', 'version': None, 'arch': None}]],
+                'enhances': [],
+                'pre-depends': [],
+                'provides': [],
+                'recommends': [[{'name': 'bzip2', 'version': None, 'arch': None}],
+                    [{'name': 'lpr', 'version': None, 'arch': None},
+                        {'name': 'rlpr', 'version': None, 'arch': None},
+                        {'name': 'cupsys-client', 'version': None, 'arch': None}],
+                    [{'name': 'wdiff', 'version': None, 'arch': None}]],
+                'replaces': [],
+                'suggests': [[{'name': 'emacsen-common', 'version': None, 'arch': None}],
+                    [{'name': 'ghostscript', 'version': None, 'arch': None}],
+                    [{'name': 'graphicsmagick-imagemagick-compat', 'version': None, 'arch': None},
+                        {'name': 'imagemagick', 'version': None, 'arch': None}],
+                    [{'name': 'groff', 'version': None, 'arch': None}],
+                    [{'name': 'gv', 'version': None, 'arch': None}],
+                    [{'name': 'html2ps', 'version': None, 'arch': None}],
+                    [{'name': 't1-cyrillic', 'version': None, 'arch': None}],
+                    [{'name': 'texlive-base-bin', 'version': None, 'arch': None}]]}
+        self.assertEqual(rel1, pkg1.relations)
+        pkg2 = pkgs.next()
+        rel2 = {'breaks': [],
+                'conflicts': [],
+                'depends': [[{'name': 'lrzsz', 'version': None, 'arch': None}],
+                    [{'name': 'openssh-client', 'version': None, 'arch': None},
+                        {'name': 'telnet', 'version': None, 'arch': None},
+                        {'name': 'telnet-ssl', 'version': None, 'arch': None}],
+                    [{'name': 'libc6', 'version': ('>=', '2.6.1-1'), 'arch': None}],
+                    [{'name': 'libncurses5', 'version': ('>=', '5.6'), 'arch': None}],
+                    [{'name': 'libreadline5', 'version': ('>=', '5.2'), 'arch': None}]],
+                'enhances': [],
+                'pre-depends': [],
+                'provides': [],
+                'recommends': [],
+                'replaces': [],
+                'suggests': []}
+        self.assertEqual(rel2, pkg2.relations)
+        pkg3 = pkgs.next()
+        dep3 = [[{'arch': None, 'name': 'dcoprss', 'version': ('>=', '4:3.5.9-2')}],
+            [{'arch': None, 'name': 'kdenetwork-kfile-plugins', 'version': ('>=', '4:3.5.9-2')}],
+            [{'arch': None, 'name': 'kdict', 'version': ('>=', '4:3.5.9-2')}],
+            [{'arch': None, 'name': 'kdnssd', 'version': ('>=', '4:3.5.9-2')}],
+            [{'arch': None, 'name': 'kget', 'version': ('>=', '4:3.5.9-2')}],
+            [{'arch': None, 'name': 'knewsticker', 'version': ('>=', '4:3.5.9-2')}],
+            [{'arch': None, 'name': 'kopete', 'version': ('>=', '4:3.5.9-2')}],
+            [{'arch': None, 'name': 'kpf', 'version': ('>=', '4:3.5.9-2')}],
+            [{'arch': None, 'name': 'kppp', 'version': ('>=', '4:3.5.9-2')}],
+            [{'arch': None, 'name': 'krdc', 'version': ('>=', '4:3.5.9-2')}],
+            [{'arch': None, 'name': 'krfb', 'version': ('>=', '4:3.5.9-2')}],
+            [{'arch': None, 'name': 'ksirc', 'version': ('>=', '4:3.5.9-2')}],
+            [{'arch': None, 'name': 'kwifimanager', 'version': ('>=', '4:3.5.9-2')}],
+            [{'arch': None, 'name': 'librss1', 'version': ('>=', '4:3.5.9-2')}]]
+        self.assertEqual(dep3, pkg3.relations['depends'])
+
+    def test_sources(self):
+        pkgs = deb822.Sources.iter_paragraphs(file('test_Sources'))
+        pkg1 = pkgs.next()
+        rel1 = {'build-conflicts': [],
+                'build-conflicts-indep': [],
+                'build-depends': [[{'name': 'apache2-src', 'version': ('>=', '2.2.9'), 'arch': None}],
+                    [{'name': 'libaprutil1-dev', 'version': None, 'arch': None}],
+                    [{'arch': [(False, 'kfreebsd-i386'), (False, 'kfreebsd-amd64'), (False, 'hurd-i386')],
+                        'name': 'libcap-dev',
+                        'version': None}],
+                    [{'name': 'autoconf', 'version': None, 'arch': None}],
+                    [{'name': 'debhelper', 'version': ('>>', '5.0.0'), 'arch': None}]],
+                'build-depends-indep': []}
+        self.assertEqual(rel1, pkg1.relations)
+        pkg2 = pkgs.next()
+        rel2 = {'build-conflicts': [],
+                'build-conflicts-indep': [],
+                'build-depends': [[{'name': 'dpkg-dev', 'version': ('>=', '1.13.9'), 'arch': None}],
+                    [{'name': 'autoconf', 'version': ('>=', '2.13'), 'arch': None}],
+                    [{'name': 'bash', 'version': None, 'arch': None}],
+                    [{'name': 'bison', 'version': None, 'arch': None}],
+                    [{'name': 'flex', 'version': None, 'arch': None}],
+                    [{'name': 'gettext', 'version': None, 'arch': None}],
+                    [{'name': 'texinfo', 'version': None, 'arch': None}],
+                    [{'arch': [(True, 'hppa')], 'name': 'expect-tcl8.3', 'version': ('>=', '5.32.2')}],
+                    [{'name': 'dejagnu', 'version': ('>=', '1.4.2-1.1'), 'arch': None}],
+                    [{'name': 'dpatch', 'version': None, 'arch': None}],
+                    [{'name': 'file', 'version': None, 'arch': None}],
+                    [{'name': 'bzip2', 'version': None, 'arch': None}],
+                    [{'name': 'lsb-release', 'version': None, 'arch': None}]],
+                'build-depends-indep': []}
+        self.assertEqual(rel2, pkg2.relations)
 
 if __name__ == '__main__':
     unittest.main()
