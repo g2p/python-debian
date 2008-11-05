@@ -1,3 +1,28 @@
+python-debian (0.1.12) unstable; urgency=low
+
+  [ Filippo Giunchedi ]
+  * Add initial support to deb822 for gpg signature checking (Closes: #485829)
+  * Suggest gpgv for signature checking
+
+  [ Stefano Zacchiroli ]
+  * deb822: add support for pretty printing structured inter-package
+    relationships (and relevant tests)
+  * debfile: add support for .tar.bz2 parts contained in .deb packages, and
+    relative regression test. Thanks to Cameron Dale and Tom Parker.
+    (Closes: #462859).
+
+  [ John Wright ]
+  * deb822: allow the use of unicode objects in __getitem__
+  * changelog: fix the "topline" regular expression to match the one in dpkg's
+    Dpkg/Changelog/Debian.pm so that it allows '.' and '+' in the distribution
+    field
+  * deb822: Add a use_apt_pkg parameter to Deb822.iter_paragraphs.  Now,
+    callers can set use_apt_pkg=True and shared_storage=False (now the default)
+    in order to take advantage of apt_pkg's speed and still be able to use
+    values across iterations.  (Closes: #504413)
+
+ -- John Wright <jsw@debian.org>  Wed, 05 Nov 2008 16:03:40 -0700
+
 python-debian (0.1.11) unstable; urgency=low
 
   [ James Westby ]

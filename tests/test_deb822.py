@@ -17,6 +17,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
+import os
 import re
 import sys
 import unittest
@@ -220,6 +221,20 @@ Files:
  81864d535c326c082de3763969c18be6 44260 python optional python-debian_0.1.10_all.deb
 '''
 
+SIGNED_CHECKSUM_CHANGES_FILE = '''\
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA1
+
+%s
+-----BEGIN PGP SIGNATURE-----
+Version: GnuPG v1.4.6 (GNU/Linux)
+
+iD8DBQFIGWQO0UIZh3p4ZWERAug/AJ93DWD9o+1VMgPDjWn/dsmPSgTWGQCeOfZi
+6LAP26zP25GAeTlKwJQ17hs=
+=fwnP
+-----END PGP SIGNATURE-----
+'''
+
 class TestDeb822Dict(unittest.TestCase):
     def make_dict(self):
         d = deb822.Deb822Dict()
@@ -272,6 +287,10 @@ class TestDeb822Dict(unittest.TestCase):
 
         self.assertEqual(d1, d2)
 
+    def test_unicode_key_access(self):
+        d = self.make_dict()
+        self.assertEqual(1, d[u'testkey'])
+
 
 class TestDeb822(unittest.TestCase):
     def assertWellParsed(self, deb822_, dict_):
@@ -321,6 +340,28 @@ class TestDeb822(unittest.TestCase):
             deb822_ = deb822.Deb822(unparsed_with_gpg.splitlines())
             self.assertWellParsed(deb822_, PARSED_PACKAGE)
 
+    def test_gpg_info(self):
+        if not os.path.exists('/usr/bin/gpgv'):
+            return
+
+        unparsed_with_gpg = SIGNED_CHECKSUM_CHANGES_FILE % CHECKSUM_CHANGES_FILE
+        deb822_from_str = deb822.Dsc(unparsed_with_gpg)
+        result_from_str = deb822_from_str.get_gpg_info()
+        deb822_from_file = deb822.Dsc(StringIO(unparsed_with_gpg))
+        result_from_file = deb822_from_file.get_gpg_info()
+        deb822_from_lines = deb822.Dsc(unparsed_with_gpg.splitlines())
+        result_from_lines = deb822_from_lines.get_gpg_info()
+        valid = {'GOODSIG':  ['D14219877A786561', 'John Wright <john.wright@hp.com>'],
+                 'VALIDSIG': ['8FEFE900783CF175827C2F65D14219877A786561', '2008-05-01',
+                              '1209623566', '0', '3', '0', '17', '2', '01',
+                              '8FEFE900783CF175827C2F65D14219877A786561'],
+                 'SIG_ID':   ['mQFnUWWR1Gr6itMV7Bx5L4N60Wo', '2008-05-01', '1209623566']}
+
+        for result in result_from_str, result_from_file, result_from_lines:
+            self.assertEqual(len(result.keys()), len(valid.keys()))
+            for k,v in valid.items():
+                self.assertEqual(''.join(v), ''.join(result[k]))
+
     def test_iter_paragraphs_array(self):
         text = (UNPARSED_PACKAGE + '\n\n\n' + UNPARSED_PACKAGE).splitlines()
 
@@ -338,8 +379,58 @@ class TestDeb822(unittest.TestCase):
             string = string % UNPARSED_PACKAGE
             text = (string + '\n\n\n' + string).splitlines()
 
+            count = 0
             for d in deb822.Deb822.iter_paragraphs(text):
+                count += 1
                 self.assertWellParsed(d, PARSED_PACKAGE)
+            self.assertEqual(count, 2)
+
+    def _test_iter_paragraphs(self, file, cls, **kwargs):
+        """Ensure iter_paragraphs consistency"""
+        
+        f = open(file)
+        packages_content = f.read()
+        f.close()
+        # XXX: The way multivalued fields parsing works, we can't guarantee
+        # that trailing whitespace is reproduced.
+        packages_content = "\n".join([line.rstrip() for line in
+                                      packages_content.splitlines()] + [''])
+
+        s = StringIO()
+        l = []
+        for p in cls.iter_paragraphs(open(file), **kwargs):
+            p.dump(s)
+            s.write("\n")
+            l.append(p)
+        self.assertEqual(s.getvalue(), packages_content)
+        if kwargs["shared_storage"] is False:
+            # If shared_storage is False, data should be consistent across
+            # iterations -- i.e. we can use "old" objects
+            s = StringIO()
+            for p in l:
+                p.dump(s)
+                s.write("\n")
+            self.assertEqual(s.getvalue(), packages_content)
+
+    def test_iter_paragraphs_apt_shared_storage_packages(self):
+        self._test_iter_paragraphs("test_Packages", deb822.Packages,
+                                   use_apt_pkg=True, shared_storage=True)
+    def test_iter_paragraphs_apt_no_shared_storage_packages(self):
+        self._test_iter_paragraphs("test_Packages", deb822.Packages,
+                                   use_apt_pkg=True, shared_storage=False)
+    def test_iter_paragraphs_no_apt_no_shared_storage_packages(self):
+        self._test_iter_paragraphs("test_Packages", deb822.Packages,
+                                   use_apt_pkg=False, shared_storage=False)
+
+    def test_iter_paragraphs_apt_shared_storage_sources(self):
+        self._test_iter_paragraphs("test_Sources", deb822.Sources,
+                                   use_apt_pkg=True, shared_storage=True)
+    def test_iter_paragraphs_apt_no_shared_storage_sources(self):
+        self._test_iter_paragraphs("test_Sources", deb822.Sources,
+                                   use_apt_pkg=True, shared_storage=False)
+    def test_iter_paragraphs_no_apt_no_shared_storage_sources(self):
+        self._test_iter_paragraphs("test_Sources", deb822.Sources,
+                                   use_apt_pkg=False, shared_storage=False)
 
     def test_parser_empty_input(self):
         self.assertEqual({}, deb822.Deb822([]))
@@ -600,6 +691,19 @@ class TestPkgRelations(unittest.TestCase):
             [{'arch': None, 'name': 'kwifimanager', 'version': ('>=', '4:3.5.9-2')}],
             [{'arch': None, 'name': 'librss1', 'version': ('>=', '4:3.5.9-2')}]]
         self.assertEqual(dep3, pkg3.relations['depends'])
+
+        bin_rels = ['file, libc6 (>= 2.7-1), libpaper1, psutils']
+        src_rels = ['apache2-src (>= 2.2.9), libaprutil1-dev, ' \
+                'libcap-dev [!kfreebsd-i386 !kfreebsd-amd64 !hurd-i386], ' \
+                'autoconf, debhelper (>> 5.0.0)']
+        for bin_rel in bin_rels:
+            self.assertEqual(bin_rel,
+                    deb822.PkgRelation.str(deb822.PkgRelation.parse_relations(
+                            bin_rel)))
+        for src_rel in src_rels:
+            self.assertEqual(src_rel,
+                    deb822.PkgRelation.str(deb822.PkgRelation.parse_relations( \
+                            src_rel)))
 
     def test_sources(self):
         pkgs = deb822.Sources.iter_paragraphs(file('test_Sources'))

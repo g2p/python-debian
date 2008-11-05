@@ -4,7 +4,7 @@
 # (.changes, .dsc, Packages, Sources, etc)
 #
 # Copyright (C) 2005-2006  dann frazier <dannf@dannf.org>
-# Copyright (C) 2006       John Wright <john@movingsucks.org>
+# Copyright (C) 2006-2008  John Wright <john@johnwright.org>
 # Copyright (C) 2006       Adeodato Simó <dato@net.com.org.es>
 # Copyright (C) 2008       Stefano Zacchiroli <zack@upsilon.cc>
 #
@@ -31,9 +31,53 @@ except ImportError:
 
 import new
 import re
+import string
 import sys
 import StringIO
 import UserDict
+
+class OrderedSet(object):
+    """A set-like object that preserves order when iterating over it
+
+    We use this to keep track of keys in Deb822Dict, because it's much faster
+    to look up if a key is in a set than in a list.
+    """
+
+    def __init__(self, iterable=[]):
+        self.__set = set()
+        self.__order = []
+        for item in iterable:
+            self.add(item)
+
+    def add(self, item):
+        if item not in self:
+            # set.add will raise TypeError if something's unhashable, so we
+            # don't have to handle that ourselves
+            self.__set.add(item)
+            self.__order.append(item)
+
+    def remove(self, item):
+        # set.remove will raise KeyError, so we don't need to handle that
+        # ourselves
+        self.__set.remove(item)
+        self.__order.remove(item)
+
+    def __iter__(self):
+        # Return an iterator of items in the order they were added
+        return iter(self.__order)
+
+    def __contains__(self, item):
+        # This is what makes OrderedSet faster than using a list to keep track
+        # of keys.  Lookup in a set is O(1) instead of O(n) for a list.
+        return item in self.__set
+
+    ### list-like methods
+    append = add
+
+    def extend(self, iterable):
+        for item in iterable:
+            self.add(item)
+    ###
 
 class Deb822Dict(object, UserDict.DictMixin):
     # Subclassing UserDict.DictMixin because we're overriding so much dict
@@ -57,7 +101,7 @@ class Deb822Dict(object, UserDict.DictMixin):
 
     def __init__(self, _dict=None, _parsed=None, _fields=None):
         self.__dict = {}
-        self.__keys = []
+        self.__keys = OrderedSet()
         self.__parsed = None
 
         if _dict is not None:
@@ -82,14 +126,12 @@ class Deb822Dict(object, UserDict.DictMixin):
                 self.__keys.extend([ _strI(k) for k in self.__parsed.keys() ])
             else:
                 self.__keys.extend([ _strI(f) for f in _fields if self.__parsed.has_key(f) ])
-
         
     ### BEGIN DictMixin methods
 
     def __setitem__(self, key, value):
         key = _strI(key)
-        if not key in self:
-            self.__keys.append(key)
+        self.__keys.add(key)
         self.__dict[key] = value
         
     def __getitem__(self, key):
@@ -101,11 +143,15 @@ class Deb822Dict(object, UserDict.DictMixin):
                 return self.__parsed[key]
             else:
                 raise
-    
+
     def __delitem__(self, key):
         key = _strI(key)
         del self.__dict[key]
         self.__keys.remove(key)
+
+    def has_key(self, key):
+        key = _strI(key)
+        return key in self.__keys
     
     def keys(self):
         return [str(key) for key in self.__keys]
@@ -164,28 +210,44 @@ class Deb822(Deb822Dict):
             except EOFError:
                 pass
 
-    def iter_paragraphs(cls, sequence, fields=None, shared_storage=True):
+        self.gpg_info = None
+
+    def iter_paragraphs(cls, sequence, fields=None, use_apt_pkg=True,
+                        shared_storage=False):
         """Generator that yields a Deb822 object for each paragraph in sequence.
 
         :param sequence: same as in __init__.
 
         :param fields: likewise.
 
-        :param shared_storage: if sequence is a file(), apt_pkg will be used 
-            if available to parse the file, since it's much much faster. On the
-            other hand, yielded objects will share storage, so they can't be
-            kept across iterations. (Also, PGP signatures won't be stripped
-            with apt_pkg.) Set this parameter to False to disable using apt_pkg. 
+        :param use_apt_pkg: if sequence is a file(), apt_pkg will be used 
+            if available to parse the file, since it's much much faster.  Set
+            this parameter to False to disable using apt_pkg.
+        :param shared_storage: if sequence is a file(), use_apt_pkg is True,
+            and shared_storage is True, yielded objects will share storage, so
+            they can't be kept across iterations.  (Also, PGP signatures won't
+            be stripped.)  By default, this parameter is False, causing a copy
+            of the parsed data to be made through each iteration.  Except for
+            with raw Deb822 paragraphs (as opposed to _multivalued subclasses),
+            the speed gained by setting shared_storage=True is marginal.  This
+            parameter has no effect if use_apt_pkg is False or apt_pkg is not
+            available.
         """
 
-        # TODO Think about still using apt_pkg even if shared_storage is False,
-        # by somehow instructing the constructor to make copy of the data. (If
-        # this is still faster.)
-
-        if _have_apt_pkg and shared_storage and isinstance(sequence, file):
+        if _have_apt_pkg and use_apt_pkg and isinstance(sequence, file):
             parser = apt_pkg.ParseTagFile(sequence)
             while parser.Step() == 1:
-                yield cls(fields=fields, _parsed=parser.Section)
+                if shared_storage:
+                    parsed = parser.Section
+                else:
+                    # Since parser.Section doesn't have an items method, we
+                    # need to imitate that method here and make a Deb822Dict
+                    # from the result in order to preserve order.
+                    items = [(key, parser.Section[key])
+                             for key in parser.Section.keys()]
+                    parsed = Deb822Dict(items)
+                yield cls(fields=fields, _parsed=parsed)
+
         else:
             iterable = iter(sequence)
             x = cls(iterable, fields)
@@ -352,8 +414,16 @@ class Deb822(Deb822Dict):
         return merged
     ###
 
-    def gpg_stripped_paragraph(sequence):
+    def split_gpg_and_payload(sequence):
+        """Return a (gpg_pre, payload, gpg_post) tuple
+        
+        Each element of the returned tuple is a list of lines (with trailing
+        whitespace stripped).
+        """
+
+        gpg_pre_lines = []
         lines = []
+        gpg_post_lines = []
         state = 'SAFE'
         gpgre = re.compile(r'^-----(?P<action>BEGIN|END) PGP (?P<what>[^-]+)-----$')
         blank_line = re.compile('^$')
@@ -376,21 +446,154 @@ class Deb822(Deb822Dict):
                     if not blank_line.match(line):
                         lines.append(line)
                     else:
-                        break
-                elif state == 'SIGNED MESSAGE' and blank_line.match(line):
-                    state = 'SAFE'
-            elif m.group('action') == 'BEGIN':
-                state = m.group('what')
-            elif m.group('action') == 'END':
-                state = 'SAFE'
+                        if not gpg_pre_lines:
+                            # There's no gpg signature, so we should stop at
+                            # this blank line
+                            break
+                elif state == 'SIGNED MESSAGE':
+                    if blank_line.match(line):
+                        state = 'SAFE'
+                    else:
+                        gpg_pre_lines.append(line)
+                elif state == 'SIGNATURE':
+                    gpg_post_lines.append(line)
+            else:
+                if m.group('action') == 'BEGIN':
+                    state = m.group('what')
+                elif m.group('action') == 'END':
+                    gpg_post_lines.append(line)
+                    break
+                if not blank_line.match(line):
+                    if not lines:
+                        gpg_pre_lines.append(line)
+                    else:
+                        gpg_post_lines.append(line)
 
         if len(lines):
-            return lines
+            return (gpg_pre_lines, lines, gpg_post_lines)
         else:
             raise EOFError('only blank lines found in input')
 
-    gpg_stripped_paragraph = staticmethod(gpg_stripped_paragraph)
+    split_gpg_and_payload = staticmethod(split_gpg_and_payload)
 
+    def gpg_stripped_paragraph(cls, sequence):
+        return cls.split_gpg_and_payload(sequence)[1]
+
+    gpg_stripped_paragraph = classmethod(gpg_stripped_paragraph)
+
+    def get_gpg_info(self):
+        """Return a GpgInfo object with GPG signature information
+
+        This method will raise ValueError if the signature is not available
+        (e.g. the original text cannot be found)"""
+
+        # raw_text is saved (as a string) only for Changes and Dsc (see
+        # _gpg_multivalued.__init__) which is small compared to Packages or
+        # Sources which contain no signature
+        if not hasattr(self, 'raw_text'):
+            raise ValueError, "original text cannot be found"
+
+        if self.gpg_info is None:
+            self.gpg_info = GpgInfo.from_sequence(self.raw_text)
+
+        return self.gpg_info
+
+###
+
+# XXX check what happens if input contains more that one signature
+class GpgInfo(dict):
+    """A wrapper around gnupg parsable output obtained via --status-fd
+
+    This class is really a dictionary containing parsed output from gnupg plus
+    some methods to make sense of the data.
+    Keys are keywords and values are arguments suitably splitted.
+    See /usr/share/doc/gnupg/DETAILS.gz"""
+
+    # keys with format "key keyid uid"
+    uidkeys = ('GOODSIG', 'EXPSIG', 'EXPKEYSIG', 'REVKEYSIG', 'BADSIG')
+
+    def valid(self):
+        """Is the signature valid?"""
+        return self.has_key('GOODSIG') or self.has_key('VALIDSIG')
+    
+# XXX implement as a property?
+# XXX handle utf-8 %-encoding
+    def uid(self):
+        """Return the primary ID of the signee key, None is not available"""
+        pass
+
+    @staticmethod
+    def from_output(out, err=None):
+        """Create a new GpgInfo object from gpg(v) --status-fd output (out) and
+        optionally collect stderr as well (err).
+        
+        Both out and err can be lines in newline-terminated sequence or regular strings."""
+
+        n = GpgInfo()
+
+        if isinstance(out, basestring):
+            out = out.split('\n')
+        if isinstance(err, basestring):
+            err = err.split('\n')
+
+        n.out = out
+        n.err = err
+        
+        header = '[GNUPG:] '
+        for l in out:
+            if not l.startswith(header):
+                continue
+
+            l = l[len(header):]
+            l = l.strip('\n')
+
+            # str.partition() would be better, 2.5 only though
+            s = l.find(' ')
+            key = l[:s]
+            if key in GpgInfo.uidkeys:
+                # value is "keyid UID", don't split UID
+                value = l[s+1:].split(' ', 1)
+            else:
+                value = l[s+1:].split(' ')
+
+            n[key] = value
+        return n 
+
+# XXX how to handle sequences of lines? file() returns \n-terminated
+    @staticmethod
+    def from_sequence(sequence, keyrings=['/usr/share/keyrings/debian-keyring.gpg'],
+            executable=["/usr/bin/gpgv"]):
+        """Create a new GpgInfo object from the given sequence.
+
+        Sequence is a sequence of lines or a string
+        executable is a list of args for subprocess.Popen, the first element being the gpg executable"""
+
+        # XXX check for gpg as well and use --verify accordingly?
+        args = executable
+        #args.extend(["--status-fd", "1", "--no-default-keyring"])
+        args.extend(["--status-fd", "1"])
+        import os
+        [args.extend(["--keyring", k]) for k in keyrings if os.path.isfile(k) and os.access(k, os.R_OK)]
+        
+        if "--keyring" not in args:
+            raise IOError, "cannot access none of given keyrings"
+
+        import subprocess
+        p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # XXX what to do with exit code?
+
+        if isinstance(sequence, basestring):
+            (out, err) = p.communicate(sequence)
+        else:
+            (out, err) = p.communicate("\n".join(sequence))
+
+        return GpgInfo.from_output(out, err)
+
+    @staticmethod
+    def from_file(target, *args):
+        """Create a new GpgInfo object from the given file, calls from_sequence(file(target), *args)"""
+        return from_sequence(file(target), *args)
+    
 ###
 
 class PkgRelation(object):
@@ -448,6 +651,31 @@ class PkgRelation(object):
         tl_deps = cls.__comma_sep_RE.split(raw.strip()) # top-level deps
         cnf = map(cls.__pipe_sep_RE.split, tl_deps)
         return map(lambda or_deps: map(parse_rel, or_deps), cnf)
+
+    @staticmethod
+    def str(rels):
+        """Format to string structured inter-package relationships
+        
+        Perform the inverse operation of parse_relations, returning a string
+        suitable to be written in a package stanza.
+        """
+        def pp_arch(arch_spec):
+            (excl, arch) = arch_spec
+            if excl:
+                return arch
+            else:
+                return '!' + arch
+
+        def pp_atomic_dep(dep):
+            s = dep['name']
+            if dep.has_key('version') and dep['version'] is not None:
+                s += ' (%s %s)' % dep['version']
+            if dep.has_key('arch') and dep['arch'] is not None:
+                s += ' [%s]' % string.join(map(pp_arch, dep['arch']))
+            return s
+
+        pp_or_dep = lambda deps: string.join(map(pp_atomic_dep, deps), ' | ')
+        return string.join(map(pp_or_dep, rels), ', ')
 
 
 class _lowercase_dict(dict):
@@ -624,7 +852,57 @@ class _multivalued(Deb822):
 
 ###
 
-class Dsc(_multivalued):
+
+class _gpg_multivalued(_multivalued):
+    """A _multivalued class that can support gpg signed objects
+
+    This class's feature is that it stores the raw text before parsing so that
+    gpg can verify the signature.  Use it just like you would use the
+    _multivalued class.
+
+    This class only stores raw text if it is given a raw string, or if it
+    detects a gpg signature when given a file or sequence of lines (see
+    Deb822.split_gpg_and_payload for details).
+    """
+
+    def __init__(self, *args, **kwargs):
+        try:
+            sequence = args[0]
+        except IndexError:
+            sequence = kwargs.get("sequence", None)
+
+        if sequence is not None:
+            if isinstance(sequence, basestring):
+                self.raw_text = sequence
+            elif hasattr(sequence, "items"):
+                # sequence is actually a dict(-like) object, so we don't have
+                # the raw text.
+                pass
+            else:
+                try:
+                    gpg_pre_lines, lines, gpg_post_lines = \
+                            self.split_gpg_and_payload(sequence)
+                except EOFError:
+                    # Empty input
+                    gpg_pre_lines = lines = gpg_post_lines = []
+                if gpg_pre_lines and gpg_post_lines:
+                    raw_text = StringIO.StringIO()
+                    raw_text.write("\n".join(gpg_pre_lines))
+                    raw_text.write("\n\n")
+                    raw_text.write("\n".join(lines))
+                    raw_text.write("\n\n")
+                    raw_text.write("\n".join(gpg_post_lines))
+                    self.raw_text = raw_text.getvalue()
+                try:
+                    args = list(args)
+                    args[0] = lines
+                except IndexError:
+                    kwargs["sequence"] = lines
+
+        _multivalued.__init__(self, *args, **kwargs)
+
+
+class Dsc(_gpg_multivalued):
     _multivalued_fields = {
         "files": [ "md5sum", "size", "name" ],
         "checksums-sha1": ["sha1", "size", "name"],
@@ -632,7 +910,7 @@ class Dsc(_multivalued):
     }
 
 
-class Changes(_multivalued):
+class Changes(_gpg_multivalued):
     _multivalued_fields = {
         "files": [ "md5sum", "size", "section", "priority", "name" ],
         "checksums-sha1": ["sha1", "size", "name"],
@@ -766,7 +1044,7 @@ class _CaseInsensitiveString(str):
         return self.str_lower_hash
 
     def __eq__(self, other):
-        return str.__eq__(self.str_lower, other.lower())
+        return self.str_lower == other.lower()
 
     def lower(self):
         return self.str_lower
