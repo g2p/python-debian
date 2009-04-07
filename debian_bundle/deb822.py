@@ -22,6 +22,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
+from deprecation import function_deprecated_by
 
 try:
     import apt_pkg
@@ -146,8 +147,13 @@ class Deb822Dict(object, UserDict.DictMixin):
 
     def __delitem__(self, key):
         key = _strI(key)
-        del self.__dict[key]
         self.__keys.remove(key)
+        try:
+            del self.__dict[key]
+        except KeyError:
+            # If we got this far, the key was in self.__keys, so it must have
+            # only been in the self.__parsed dict.
+            pass
 
     def has_key(self, key):
         key = _strI(key)
@@ -337,22 +343,26 @@ class Deb822(Deb822Dict):
 
     ###
 
-    def isSingleLine(self, s):
+    def is_single_line(self, s):
         if s.count("\n"):
             return False
         else:
             return True
 
-    def isMultiLine(self, s):
-        return not self.isSingleLine(s)
+    isSingleLine = function_deprecated_by(is_single_line)
 
-    def _mergeFields(self, s1, s2):
+    def is_multi_line(self, s):
+        return not self.is_single_line(s)
+
+    isMultiLine = function_deprecated_by(is_multi_line)
+
+    def _merge_fields(self, s1, s2):
         if not s2:
             return s1
         if not s1:
             return s2
 
-        if self.isSingleLine(s1) and self.isSingleLine(s2):
+        if self.is_single_line(s1) and self.is_single_line(s2):
             ## some fields are delimited by a single space, others
             ## a comma followed by a space.  this heuristic assumes
             ## that there are multiple items in one of the string fields
@@ -374,7 +384,7 @@ class Deb822(Deb822Dict):
                 prev = item
             return merged
 
-        if self.isMultiLine(s1) and self.isMultiLine(s2):
+        if self.is_multi_line(s1) and self.is_multi_line(s2):
             for item in s2.splitlines(True):
                 if item not in s1.splitlines(True):
                     s1 = s1 + "\n" + item
@@ -382,7 +392,9 @@ class Deb822(Deb822Dict):
 
         raise ValueError
 
-    def mergeFields(self, key, d1, d2 = None):
+    _mergeFields = function_deprecated_by(_merge_fields)
+
+    def merge_fields(self, key, d1, d2=None):
         ## this method can work in two ways - abstract that away
         if d2 == None:
             x1 = self
@@ -412,11 +424,12 @@ class Deb822(Deb822Dict):
             return None
 
         return merged
-    ###
+
+    mergeFields = function_deprecated_by(merge_fields)
 
     def split_gpg_and_payload(sequence):
         """Return a (gpg_pre, payload, gpg_post) tuple
-        
+
         Each element of the returned tuple is a list of lines (with trailing
         whitespace stripped).
         """
@@ -792,7 +805,7 @@ class _multivalued(Deb822):
             except KeyError:
                 continue
 
-            if self.isMultiLine(contents):
+            if self.is_multi_line(contents):
                 self[field] = []
                 updater_method = self[field].append
             else:

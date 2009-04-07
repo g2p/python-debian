@@ -1,3 +1,22 @@
+python-debian (0.1.13) unstable; urgency=low
+
+  [ John Wright ]
+  * deb822: Correctly handle deletion of keys that only exist in a pre-parsed
+    dictionary
+
+  [ Stefano Zacchiroli ]
+  * change naming convention to match PEP 8, with backward compatibility
+    (and deprecation warnings) for all old names. Thanks to Ben Finney for
+    the patch. (Closes: #489722)
+  * Switch from "sha" module to "hashlib": fix a deprecation warning of
+    Python 2.6. As a consequence, update pyversions to require a minimum
+    of Python 2.5, which is available also in stable now. (Closes: #518427)
+  * debian_support.PackageFile: allow for stanza separators made of tabs
+    and spaces in addition to newlines (Closes: #501927)
+  * bump Standards-Version to 3.8.1 (no changes needed)
+
+ -- Stefano Zacchiroli <zack@debian.org>  Tue, 07 Apr 2009 10:21:04 +0200
+
 python-debian (0.1.12) unstable; urgency=low
 
   [ Filippo Giunchedi ]
