@@ -1024,7 +1024,7 @@ class Sources(Dsc, _PkgRelationMixin):
     """Represent an APT source package list"""
 
     _relationship_fields = [ 'build-depends', 'build-depends-indep',
-            'build-conflicts', 'build-conflicts-indep' ]
+            'build-conflicts', 'build-conflicts-indep', 'binary' ]
 
     def __init__(self, *args, **kwargs):
         Dsc.__init__(self, *args, **kwargs)
@@ -1048,10 +1048,11 @@ class _CaseInsensitiveString(str):
     """Case insensitive string.
     """
 
-    def __init__(self, str_):
-        str.__init__(self, str_)
-        self.str_lower = str_.lower()
-        self.str_lower_hash = hash(self.str_lower)
+    def __new__(cls, str_):
+        s = str.__new__(cls, str_)
+        s.str_lower = str_.lower()
+        s.str_lower_hash = hash(s.str_lower)
+        return s
 
     def __hash__(self):
         return self.str_lower_hash

@@ -1,3 +1,23 @@
+python-debian (0.1.14) unstable; urgency=low
+
+  [ Stefano Zacchiroli ]
+  * setup.py.in: switch to setuptools, which are able to generate eggs;
+    add matching build-dep on python-setuptools (Closes: #525694)
+  * examples/deb822/: add new example render-dctrl, to render packages in
+    a dctrl-tools pipeline (using Markdown as long description syntax)
+  * deb822: use __new__ to sub-class strings for case-insensitiveness;
+    former approach is deprecated with python 2.6.
+    Thanks to Loïc Minier for the patch. (Closes: #524061)
+
+  [ Filippo Giunchedi ]
+  * deb822: parse also Binary as PkgRelation, thus add .binary attribute
+
+  [ Muharem Hrnjadovic ]
+  * fixed changelog parser exception raised when dealing with empty
+    changelog files (LP: #400589).
+
+ -- Stefano Zacchiroli <zack@debian.org>  Sat, 18 Jul 2009 21:26:40 +0200
+
 python-debian (0.1.13) unstable; urgency=low
 
   [ John Wright ]
