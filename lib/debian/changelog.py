@@ -24,7 +24,6 @@
 """This module implements facilities to deal with Debian changelogs."""
 
 import re
-import unittest
 import warnings
 
 import debian_support
@@ -54,67 +53,9 @@ class VersionError(StandardError):
     def __str__(self):
         return "Could not parse version: "+self._version
 
-class Version(debian_support.Version, object):
+class Version(debian_support.Version):
     """Represents a version of a Debian package."""
-    # Subclassing debian_support.Version for its rich comparison
-
-    def __init__(self, version):
-        version = str(version)
-        debian_support.Version.__init__(self, version)
-
-        self.full_version = version
-
-    def __setattr__(self, attr, value):
-      """Update all the attributes, given a particular piece of the version
-  
-      Allowable values for attr, hopefully self-explanatory:
-        full_version
-        epoch
-        upstream_version
-        debian_version
-
-      Any attribute starting with __ is given to object's __setattr__ method.
-      """
-
-      attrs = ('full_version', 'epoch', 'upstream_version', 'debian_version')
-
-      if attr.startswith('_Version__'):
-          object.__setattr__(self, attr, value)
-          return
-      elif attr not in attrs:
-          raise AttributeError("Cannot assign to attribute " + attr)
-
-      if attr == 'full_version':
-          version = value
-          p = re.compile(r'^(?:(?P<epoch>\d+):)?'
-                         + r'(?P<upstream_version>[A-Za-z0-9.+:~-]+?)'
-                         + r'(?:-(?P<debian_version>[A-Za-z0-9.~+]+))?$')
-          m = p.match(version)
-          if m is None:
-              raise VersionError(version)
-          for key, value in m.groupdict().items():
-              object.__setattr__(self, key, value)
-          self.__asString = version
-    
-      else:
-          # Construct a full version from what was given and pass it back here
-          d = {}
-          for a in attrs[1:]:
-              if a == attr:
-                  d[a] = value
-              else:
-                  d[a] = getattr(self, a)
-
-          version = ""
-          if d['epoch'] and d['epoch'] != '0':
-              version += d['epoch'] + ":"
-          version += d['upstream_version']
-          if d['debian_version']:
-              version += '-' + d['debian_version']
-
-          self.full_version = version
-
-    full_version = property(lambda self: self.__asString)
+    # debian_support.Version now has all the functionality we need
 
 class ChangeBlock(object):
     """Holds all the information about one block from the changelog."""
@@ -298,10 +239,12 @@ class Changelog(object):
                 self._parse_error('Empty changelog file.', strict)
                 return
 
-            if file[-1] != '\n':
-                file += '\n'
-            file = file.split('\n')[:-1]
+            file = file.splitlines()
         for line in file:
+            # Support both lists of lines without the trailing newline and
+            # those with trailing newlines (e.g. when given a file object
+            # directly)
+            line = line.rstrip('\n')
             if state == first_heading or state == next_heading_or_eof:
                 top_match = topline.match(line)
                 blank_match = blankline.match(line)
@@ -464,7 +407,8 @@ class Changelog(object):
     ### For convenience, let's expose some of the version properties
     full_version = property(lambda self: self.version.full_version)
     epoch = property(lambda self: self.version.epoch)
-    debian_version = property(lambda self: self.version.debian_version)
+    debian_version = property(lambda self: self.version.debian_revision)
+    debian_revision = property(lambda self: self.version.debian_revision)
     upstream_version = property(lambda self: self.version.upstream_version)
 
     def get_package(self):
@@ -493,6 +437,12 @@ class Changelog(object):
             cl += str(block)
         return cl
 
+    def __iter__(self):
+        return iter(self._blocks)
+
+    def __len__(self):
+        return len(self._blocks)
+
     def set_distributions(self, distributions):
         self._blocks[0].distributions = distributions
     distributions = property(lambda self: self._blocks[0].distributions,
@@ -520,190 +470,3 @@ class Changelog(object):
 
     def write_to_open_file(self, file):
         file.write(self.__str__())
-
-def _test():
-    import doctest
-    doctest.testmod()
-
-    unittest.main()
-
-class ChangelogTests(unittest.TestCase):
-
-    def test_create_changelog(self):
-        c = open('test_changelog').read()
-        cl = Changelog(c)
-        cs = str(cl)
-        clines = c.split('\n')
-        cslines = cs.split('\n')
-        for i in range(len(clines)):
-            self.assertEqual(clines[i], cslines[i])
-        self.assertEqual(len(clines), len(cslines), "Different lengths")
-
-    def test_create_changelog_single_block(self):
-        c = open('test_changelog').read()
-        cl = Changelog(c, max_blocks=1)
-        cs = str(cl)
-        self.assertEqual(cs,
-        """gnutls13 (1:1.4.1-1) unstable; urgency=HIGH
-
-  [ James Westby ]
-  * New upstream release.
-  * Remove the following patches as they are now included upstream:
-    - 10_certtoolmanpage.diff
-    - 15_fixcompilewarning.diff
-    - 30_man_hyphen_*.patch
-  * Link the API reference in /usr/share/gtk-doc/html as gnutls rather than
-    gnutls-api so that devhelp can find it.
-
- -- Andreas Metzler <ametzler@debian.org>  Sat, 15 Jul 2006 11:11:08 +0200
-
-""")
-
-    def test_modify_changelog(self):
-        c = open('test_modify_changelog1').read()
-        cl = Changelog(c)
-        cl.package = 'gnutls14'
-        cl.version = '1:1.4.1-2'
-        cl.distributions = 'experimental'
-        cl.urgency = 'medium'
-        cl.add_change('  * Add magic foo')
-        cl.author = 'James Westby <jw+debian@jameswestby.net>'
-        cl.date = 'Sat, 16 Jul 2008 11:11:08 -0200'
-        c = open('test_modify_changelog2').read()
-        clines = c.split('\n')
-        cslines = str(cl).split('\n')
-        for i in range(len(clines)):
-            self.assertEqual(clines[i], cslines[i])
-        self.assertEqual(len(clines), len(cslines), "Different lengths")
-
-    def test_add_changelog_section(self):
-        c = open('test_modify_changelog2').read()
-        cl = Changelog(c)
-        cl.new_block(package='gnutls14',
-                version=Version('1:1.4.1-3'),
-                distributions='experimental',
-                urgency='low',
-                author='James Westby <jw+debian@jameswestby.net>')
-
-        self.assertRaises(ChangelogCreateError, cl.__str__)
-
-        cl.set_date('Sat, 16 Jul 2008 11:11:08 +0200')
-        cl.add_change('')
-        cl.add_change('  * Foo did not work, let us try bar')
-        cl.add_change('')
-
-        c = open('test_modify_changelog3').read()
-        clines = c.split('\n')
-        cslines = str(cl).split('\n')
-        for i in range(len(clines)):
-            self.assertEqual(clines[i], cslines[i])
-        self.assertEqual(len(clines), len(cslines), "Different lengths")
-
-    def test_strange_changelogs(self):
-        """ Just opens and parses a strange changelog """
-        c = open('test_strange_changelog').read()
-        cl = Changelog(c)
-
-    def test_set_version_with_string(self):
-        c1 = Changelog(open('test_modify_changelog1').read())
-        c2 = Changelog(open('test_modify_changelog1').read())
-
-        c1.version = '1:2.3.5-2'
-        c2.version = Version('1:2.3.5-2')
-        self.assertEqual(c1.version, c2.version)
-        self.assertEqual((c1.full_version, c1.epoch, c1.upstream_version,
-                          c1.debian_version),
-                         (c2.full_version, c2.epoch, c2.upstream_version,
-                          c2.debian_version))
-
-    def test_changelog_no_author(self):
-        cl_no_author = """gnutls13 (1:1.4.1-1) unstable; urgency=low
-
-  * New upstream release.
-
- --
-"""
-        c1 = Changelog()
-        c1.parse_changelog(cl_no_author, allow_empty_author=True)
-        self.assertEqual(c1.author, None)
-        self.assertEqual(c1.date, None)
-        self.assertEqual(c1.package, "gnutls13")
-        c2 = Changelog()
-        self.assertRaises(ChangelogParseError, c2.parse_changelog, cl_no_author)
-
-    def test_magic_version_properties(self):
-        c = Changelog(open('test_changelog'))
-        self.assertEqual(c.debian_version, '1')
-        self.assertEqual(c.full_version, '1:1.4.1-1')
-        self.assertEqual(c.upstream_version, '1.4.1')
-        self.assertEqual(c.epoch, '1')
-        self.assertEqual(str(c.version), c.full_version)
-
-    def test_allow_full_stops_in_distribution(self):
-        c = Changelog(open('test_changelog_full_stops'))
-        self.assertEqual(c.debian_version, None)
-        self.assertEqual(c.full_version, '1.2.3')
-        self.assertEqual(str(c.version), c.full_version)
-
-class VersionTests(unittest.TestCase):
-
-    def _test_version(self, full_version, epoch, upstream, debian):
-        v = Version(full_version)
-        self.assertEqual(v.full_version, full_version, "Full version broken")
-        self.assertEqual(v.epoch, epoch, "Epoch broken")
-        self.assertEqual(v.upstream_version, upstream, "Upstram broken")
-        self.assertEqual(v.debian_version, debian, "Debian broken")
-
-    def testversions(self):
-        self._test_version('1:1.4.1-1', '1', '1.4.1', '1')
-        self._test_version('7.1.ds-1', None, '7.1.ds', '1')
-        self._test_version('10.11.1.3-2', None, '10.11.1.3', '2')
-        self._test_version('4.0.1.3.dfsg.1-2', None, '4.0.1.3.dfsg.1', '2')
-        self._test_version('0.4.23debian1', None, '0.4.23debian1', None)
-        self._test_version('1.2.10+cvs20060429-1', None,
-                '1.2.10+cvs20060429', '1')
-        self._test_version('0.2.0-1+b1', None, '0.2.0', '1+b1')
-        self._test_version('4.3.90.1svn-r21976-1', None,
-                '4.3.90.1svn-r21976', '1')
-        self._test_version('1.5+E-14', None, '1.5+E', '14')
-        self._test_version('20060611-0.0', None, '20060611', '0.0')
-        self._test_version('0.52.2-5.1', None, '0.52.2', '5.1')
-        self._test_version('7.0-035+1', None, '7.0', '035+1')
-        self._test_version('1.1.0+cvs20060620-1+2.6.15-8', None,
-            '1.1.0+cvs20060620-1+2.6.15', '8')
-        self._test_version('1.1.0+cvs20060620-1+1.0', None,
-                '1.1.0+cvs20060620', '1+1.0')
-        self._test_version('4.2.0a+stable-2sarge1', None, '4.2.0a+stable',
-                           '2sarge1')
-        self._test_version('1.8RC4b', None, '1.8RC4b', None)
-        self._test_version('0.9~rc1-1', None, '0.9~rc1', '1')
-        self._test_version('2:1.0.4+svn26-1ubuntu1', '2', '1.0.4+svn26',
-                           '1ubuntu1')
-        self._test_version('2:1.0.4~rc2-1', '2', '1.0.4~rc2', '1')
-
-    def test_version_updating(self):
-        v = Version('1:1.4.1-1')
-
-        v.debian_version = '2'
-        self.assertEqual(v.debian_version, '2')
-        self.assertEqual(v.full_version, '1:1.4.1-2')
-
-        v.upstream_version = '1.4.2'
-        self.assertEqual(v.upstream_version, '1.4.2')
-        self.assertEqual(v.full_version, '1:1.4.2-2')
-
-        v.epoch = '2'
-        self.assertEqual(v.epoch, '2')
-        self.assertEqual(v.full_version, '2:1.4.2-2')
-
-        self.assertEqual(str(v), v.full_version)
-
-        v.full_version = '1:1.4.1-1'
-        self.assertEqual(v.full_version, '1:1.4.1-1')
-        self.assertEqual(v.epoch, '1')
-        self.assertEqual(v.upstream_version, '1.4.1')
-        self.assertEqual(v.debian_version, '1')
-
-if __name__ == "__main__":
-    _test()
-

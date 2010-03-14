@@ -37,6 +37,33 @@ import sys
 import StringIO
 import UserDict
 
+class TagSectionWrapper(object, UserDict.DictMixin):
+    """Wrap a TagSection object, using its find_raw method to get field values
+
+    This allows us to pick which whitespace to strip off the beginning and end
+    of the data, so we don't lose leading newlines.
+    """
+
+    def __init__(self, section):
+        self.__section = section
+
+    def keys(self):
+        return self.__section.keys()
+
+    def __getitem__(self, key):
+        s = self.__section.find_raw(key)
+
+        if s is None:
+            raise KeyError(key)
+
+        # Get just the stuff after the first ':'
+        # Could use s.partition if we only supported python >= 2.5
+        data = s[s.find(':')+1:]
+
+        # Get rid of spaces and tabs after the ':', but not newlines, and strip
+        # off any newline at the end of the data.
+        return data.lstrip(' \t').rstrip('\n')
+
 class OrderedSet(object):
     """A set-like object that preserves order when iterating over it
 
@@ -100,10 +127,12 @@ class Deb822Dict(object, UserDict.DictMixin):
 
     # See the end of the file for the definition of _strI
 
-    def __init__(self, _dict=None, _parsed=None, _fields=None):
+    def __init__(self, _dict=None, _parsed=None, _fields=None,
+                 encoding="utf-8"):
         self.__dict = {}
         self.__keys = OrderedSet()
         self.__parsed = None
+        self.encoding = encoding
 
         if _dict is not None:
             # _dict may be a dict or a list of two-sized tuples
@@ -138,12 +167,17 @@ class Deb822Dict(object, UserDict.DictMixin):
     def __getitem__(self, key):
         key = _strI(key)
         try:
-            return self.__dict[key]
+            value = self.__dict[key]
         except KeyError:
             if self.__parsed is not None and key in self.__keys:
-                return self.__parsed[key]
+                value = self.__parsed[key]
             else:
                 raise
+
+        if isinstance(value, str):
+            # Always return unicode objects instead of strings
+            value = value.decode(self.encoding)
+        return value
 
     def __delitem__(self, key):
         key = _strI(key)
@@ -190,7 +224,8 @@ class Deb822Dict(object, UserDict.DictMixin):
 
 class Deb822(Deb822Dict):
 
-    def __init__(self, sequence=None, fields=None, _parsed=None):
+    def __init__(self, sequence=None, fields=None, _parsed=None,
+                 encoding="utf-8"):
         """Create a new Deb822 instance.
 
         :param sequence: a string, or any any object that returns a line of
@@ -201,6 +236,10 @@ class Deb822(Deb822Dict):
             should be parsed (the rest will be discarded).
 
         :param _parsed: internal parameter.
+
+        :param encoding: When parsing strings, interpret them in this encoding.
+            (All values are given back as unicode objects, so an encoding is
+            necessary in order to properly interpret the strings.)
         """
 
         if hasattr(sequence, 'items'):
@@ -208,7 +247,8 @@ class Deb822(Deb822Dict):
             sequence = None
         else:
             _dict = None
-        Deb822Dict.__init__(self, _dict=_dict, _parsed=_parsed, _fields=fields)
+        Deb822Dict.__init__(self, _dict=_dict, _parsed=_parsed, _fields=fields,
+                            encoding=encoding)
 
         if sequence is not None:
             try:
@@ -219,7 +259,7 @@ class Deb822(Deb822Dict):
         self.gpg_info = None
 
     def iter_paragraphs(cls, sequence, fields=None, use_apt_pkg=True,
-                        shared_storage=False):
+                        shared_storage=False, encoding="utf-8"):
         """Generator that yields a Deb822 object for each paragraph in sequence.
 
         :param sequence: same as in __init__.
@@ -229,37 +269,25 @@ class Deb822(Deb822Dict):
         :param use_apt_pkg: if sequence is a file(), apt_pkg will be used 
             if available to parse the file, since it's much much faster.  Set
             this parameter to False to disable using apt_pkg.
-        :param shared_storage: if sequence is a file(), use_apt_pkg is True,
-            and shared_storage is True, yielded objects will share storage, so
-            they can't be kept across iterations.  (Also, PGP signatures won't
-            be stripped.)  By default, this parameter is False, causing a copy
-            of the parsed data to be made through each iteration.  Except for
-            with raw Deb822 paragraphs (as opposed to _multivalued subclasses),
-            the speed gained by setting shared_storage=True is marginal.  This
-            parameter has no effect if use_apt_pkg is False or apt_pkg is not
-            available.
+        :param shared_storage: not used, here for historical reasons.  Deb822
+            objects never use shared storage anymore.
+        :param encoding: Interpret the paragraphs in this encoding.
+            (All values are given back as unicode objects, so an encoding is
+            necessary in order to properly interpret the strings.)
         """
 
         if _have_apt_pkg and use_apt_pkg and isinstance(sequence, file):
-            parser = apt_pkg.ParseTagFile(sequence)
-            while parser.Step() == 1:
-                if shared_storage:
-                    parsed = parser.Section
-                else:
-                    # Since parser.Section doesn't have an items method, we
-                    # need to imitate that method here and make a Deb822Dict
-                    # from the result in order to preserve order.
-                    items = [(key, parser.Section[key])
-                             for key in parser.Section.keys()]
-                    parsed = Deb822Dict(items)
-                yield cls(fields=fields, _parsed=parsed)
+            parser = apt_pkg.TagFile(sequence)
+            for section in parser:
+                yield cls(fields=fields, _parsed=TagSectionWrapper(section),
+                          encoding=encoding)
 
         else:
             iterable = iter(sequence)
-            x = cls(iterable, fields)
+            x = cls(iterable, fields, encoding=encoding)
             while len(x) != 0:
                 yield x
-                x = cls(iterable, fields)
+                x = cls(iterable, fields, encoding=encoding)
 
     iter_paragraphs = classmethod(iter_paragraphs)
 
@@ -278,6 +306,8 @@ class Deb822(Deb822Dict):
         curkey = None
         content = ""
         for line in self.gpg_stripped_paragraph(sequence):
+            if isinstance(line, str):
+                line = line.decode(self.encoding)
             m = single.match(line)
             if m:
                 if curkey:
@@ -317,12 +347,29 @@ class Deb822(Deb822Dict):
     def __str__(self):
         return self.dump()
 
+    def __unicode__(self):
+        return self.dump()
+
     # __repr__ is handled by Deb822Dict
 
-    def dump(self, fd=None):
+    def get_as_string(self, key):
+        """Return the self[key] as a string (or unicode)
+
+        The default implementation just returns unicode(self[key]); however,
+        this can be overridden in subclasses (e.g. _multivalued) that can take
+        special values.
+        """
+        return unicode(self[key])
+
+    def dump(self, fd=None, encoding=None):
         """Dump the the contents in the original format
 
-        If fd is None, return a string.
+        If fd is None, return a unicode object.
+
+        If fd is not None, attempt to encode the output to the encoding the
+        object was initialized with, or the value of the encoding argument if
+        it is not None.  This will raise UnicodeEncodeError if the encoding
+        can't support all the characters in the Deb822Dict values.
         """
 
         if fd is None:
@@ -330,14 +377,25 @@ class Deb822(Deb822Dict):
             return_string = True
         else:
             return_string = False
-        for key, value in self.iteritems():
+
+        if encoding is None:
+            # Use the encoding we've been using to decode strings with if none
+            # was explicitly specified
+            encoding = self.encoding
+
+        for key in self.iterkeys():
+            value = self.get_as_string(key)
             if not value or value[0] == '\n':
                 # Avoid trailing whitespace after "Field:" if it's on its own
                 # line or the value is empty
                 # XXX Uh, really print value if value == '\n'?
-                fd.write('%s:%s\n' % (key, value))
+                entry = '%s:%s\n' % (key, value)
             else:
-                fd.write('%s: %s\n' % (key, value))
+                entry = '%s: %s\n' % (key, value)
+            if not return_string:
+                fd.write(entry.encode(encoding))
+            else:
+                fd.write(entry)
         if return_string:
             return fd.getvalue()
 
@@ -815,53 +873,35 @@ class _multivalued(Deb822):
             for line in filter(None, contents.splitlines()):
                 updater_method(Deb822Dict(zip(fields, line.split())))
 
-    def dump(self, fd=None):
-        """Dump the contents in the original format
-
-        If fd is None, return a string.
-        """
-        
-        if fd is None:
+    def get_as_string(self, key):
+        keyl = key.lower()
+        if keyl in self._multivalued_fields:
             fd = StringIO.StringIO()
-            return_string = True
+            if hasattr(self[key], 'keys'): # single-line
+                array = [ self[key] ]
+            else: # multi-line
+                fd.write("\n")
+                array = self[key]
+
+            order = self._multivalued_fields[keyl]
+            try:
+                field_lengths = self._fixed_field_lengths
+            except AttributeError:
+                field_lengths = {}
+            for item in array:
+                for x in order:
+                    raw_value = str(item[x])
+                    try:
+                        length = field_lengths[keyl][x]
+                    except KeyError:
+                        value = raw_value
+                    else:
+                        value = (length - len(raw_value)) * " " + raw_value
+                    fd.write(" %s" % value)
+                fd.write("\n")
+            return fd.getvalue().rstrip("\n")
         else:
-            return_string = False
-        for key in self.keys():
-            keyl = key.lower()
-            if keyl not in self._multivalued_fields:
-                value = self[key]
-                if not value or value[0] == '\n':
-                    # XXX Uh, really print value if value == '\n'?
-                    fd.write('%s:%s\n' % (key, value))
-                else:
-                    fd.write('%s: %s\n' % (key, value))
-            else:
-                fd.write(key + ":")
-                if hasattr(self[key], 'keys'): # single-line
-                    array = [ self[key] ]
-                else: # multi-line
-                    fd.write("\n")
-                    array = self[key]
-
-                order = self._multivalued_fields[keyl]
-                try:
-                    field_lengths = self._fixed_field_lengths
-                except AttributeError:
-                    field_lengths = {}
-                for item in array:
-                    for x in order:
-                        raw_value = str(item[x])
-                        try:
-                            length = field_lengths[keyl][x]
-                        except KeyError:
-                            value = raw_value
-                        else:
-                            value = (length - len(raw_value)) * " " + raw_value
-                        fd.write(" %s" % value)
-                    fd.write("\n")
-        if return_string:
-            return fd.getvalue()
-
+            return Deb822.get_as_string(self, key)
 
 ###
 

@@ -1,5 +1,6 @@
 # debian_support.py -- Python module for Debian metadata
 # Copyright (C) 2005 Florian Weimer <fw@deneb.enyo.de>
+# Copyright (C) 2010 John Wright <jsw@debian.org>
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -23,8 +24,13 @@ import hashlib
 import types
 
 from deprecation import function_deprecated_by
-import apt_pkg
-apt_pkg.init()
+
+try:
+    import apt_pkg
+    apt_pkg.init()
+    __have_apt_pkg = True
+except ImportError:
+    __have_apt_pkg = False
 
 class ParseError(Exception):
     """An exception which is used to signal a parse failure.
@@ -58,30 +64,198 @@ class ParseError(Exception):
 
     printOut = function_deprecated_by(print_out)
 
-class Version:
-    """Version class which uses the original APT comparison algorithm."""
+class BaseVersion(object):
+    """Base class for classes representing Debian versions
+
+    It doesn't implement any comparison, but it does check for valid versions
+    according to Section 5.6.12 in the Debian Policy Manual.  Since splitting
+    the version into epoch, upstream_version, and debian_revision components is
+    pretty much free with the validation, it sets those fields as properties of
+    the object, and sets the raw version to the full_version property.  A
+    missing epoch or debian_revision results in the respective property set to
+    None.  Setting any of the properties results in the full_version being
+    recomputed and the rest of the properties set from that.
+
+    It also implements __str__, just returning the raw version given to the
+    initializer.
+    """
+
+    re_valid_version = re.compile(
+            r"^((?P<epoch>\d+):)?"
+             "(?P<upstream_version>[A-Za-z0-9.+:~-]+?)"
+             "(-(?P<debian_revision>[A-Za-z0-9+.~]+))?$")
+    magic_attrs = ('full_version', 'epoch', 'upstream_version',
+                   'debian_revision', 'debian_version')
 
     def __init__(self, version):
-        """Creates a new Version object."""
-        t = type(version)
-        if t == types.UnicodeType:
-            version = version.encode('UTF-8')
+        self.full_version = version
+
+    def _set_full_version(self, version):
+        m = self.re_valid_version.match(version)
+        if not m:
+            raise ValueError("Invalid version string %r" % version)
+
+        self.__full_version = version
+        self.__epoch = m.group("epoch")
+        self.__upstream_version = m.group("upstream_version")
+        self.__debian_revision = m.group("debian_revision")
+
+    def __setattr__(self, attr, value):
+        if attr not in self.magic_attrs:
+            super(BaseVersion, self).__setattr__(attr, value)
+            return
+
+        # For compatibility with the old changelog.Version class
+        if attr == "debian_version":
+            attr = "debian_revision"
+
+        if attr == "full_version":
+            self._set_full_version(str(value))
         else:
-            assert t == types.StringType, `version`
-        assert version <> ""
-        self.__asString = version
+            if value is not None:
+                value = str(value)
+            private = "_BaseVersion__%s" % attr
+            old_value = getattr(self, private)
+            setattr(self, private, value)
+            try:
+                self._update_full_version()
+            except ValueError:
+                # Don't leave it in an invalid state
+                setattr(self, private, old_value)
+                self._update_full_version()
+                raise ValueError("Setting %s to %r results in invalid version"
+                                 % (attr, value))
+
+    def __getattr__(self, attr):
+        if attr not in self.magic_attrs:
+            return super(BaseVersion, self).__getattribute__(attr)
+
+        # For compatibility with the old changelog.Version class
+        if attr == "debian_version":
+            attr = "debian_revision"
+
+        private = "_BaseVersion__%s" % attr
+        return getattr(self, private)
+
+    def _update_full_version(self):
+        version = ""
+        if self.__epoch is not None:
+            version += self.__epoch + ":"
+        version += self.__upstream_version
+        if self.__debian_revision:
+            version += "-" + self.__debian_revision
+        self.full_version = version
 
     def __str__(self):
-        return self.__asString
+        return self.full_version
 
     def __repr__(self):
-        return 'Version(%s)' % `self.__asString`
+        return "%s('%s')" % (self.__class__.__name__, self)
 
     def __cmp__(self, other):
-        return apt_pkg.VersionCompare(self.__asString, other.__asString)
+        raise NotImplementedError
 
+    def __hash__(self):
+        return hash(str(self))
 
-version_compare = apt_pkg.VersionCompare
+class AptPkgVersion(BaseVersion):
+    """Represents a Debian package version, using apt_pkg.VersionCompare"""
+
+    def __cmp__(self, other):
+        return apt_pkg.VersionCompare(str(self), str(other))
+
+# NativeVersion based on the DpkgVersion class by Raphael Hertzog in
+# svn://svn.debian.org/qa/trunk/pts/www/bin/common.py r2361
+class NativeVersion(BaseVersion):
+    """Represents a Debian package version, with native Python comparison"""
+
+    re_all_digits_or_not = re.compile("\d+|\D+")
+    re_digits = re.compile("\d+")
+    re_digit = re.compile("\d")
+    re_alpha = re.compile("[A-Za-z]")
+
+    def __cmp__(self, other):
+        # Convert other into an instance of BaseVersion if it's not already.
+        # (All we need is epoch, upstream_version, and debian_revision
+        # attributes, which BaseVersion gives us.) Requires other's string
+        # representation to be the raw version.
+        if not isinstance(other, BaseVersion):
+            try:
+                other = BaseVersion(str(other))
+            except ValueError, e:
+                raise ValueError("Couldn't convert %r to BaseVersion: %s"
+                                 % (other, e))
+
+        res = cmp(int(self.epoch or "0"), int(other.epoch or "0"))
+        if res != 0:
+            return res
+        res = self._version_cmp_part(self.upstream_version,
+                                     other.upstream_version)
+        if res != 0:
+            return res
+        return self._version_cmp_part(self.debian_revision or "0",
+                                      other.debian_revision or "0")
+
+    @classmethod
+    def _order(cls, x):
+        """Return an integer value for character x"""
+        if x == '~':
+            return -1
+        elif cls.re_digit.match(x):
+            return int(x) + 1
+        elif cls.re_alpha.match(x):
+            return ord(x)
+        else:
+            return ord(x) + 256
+
+    @classmethod
+    def _version_cmp_string(cls, va, vb):
+        la = [cls._order(x) for x in va]
+        lb = [cls._order(x) for x in vb]
+        while la or lb:
+            a = 0
+            b = 0
+            if la:
+                a = la.pop(0)
+            if lb:
+                b = lb.pop(0)
+            res = cmp(a, b)
+            if res != 0:
+                return res
+        return 0
+
+    @classmethod
+    def _version_cmp_part(cls, va, vb):
+        la = cls.re_all_digits_or_not.findall(va)
+        lb = cls.re_all_digits_or_not.findall(vb)
+        while la or lb:
+            a = "0"
+            b = "0"
+            if la:
+                a = la.pop(0)
+            if lb:
+                b = lb.pop(0)
+            if cls.re_digits.match(a) and cls.re_digits.match(b):
+                a = int(a)
+                b = int(b)
+                res = cmp(a, b)
+                if res != 0:
+                    return res
+            else:
+                res = cls._version_cmp_string(a, b)
+                if res != 0:
+                    return res
+        return 0
+
+if __have_apt_pkg:
+    class Version(AptPkgVersion):
+        pass
+else:
+    class Version(NativeVersion):
+        pass
+
+def version_compare(a, b):
+    return cmp(Version(a), Version(b))
 
 class PackageFile:
     """A Debian package file.
@@ -417,53 +591,3 @@ def merge_as_sets(*args):
     return l
 
 mergeAsSets = function_deprecated_by(merge_as_sets)
-
-def test():
-    # Version
-    assert Version('0') < Version('a')
-    assert Version('1.0') < Version('1.1')
-    assert Version('1.2') < Version('1.11')
-    assert Version('1.0-0.1') < Version('1.1')
-    assert Version('1.0-0.1') < Version('1.0-1')
-    assert Version('1.0-0.1') == Version('1.0-0.1')
-    assert Version('1.0-0.1') < Version('1.0-1')
-    assert Version('1.0final-5sarge1') > Version('1.0final-5') \
-           > Version('1.0a7-2')
-    assert Version('0.9.2-5') < Version('0.9.2+cvs.1.0.dev.2004.07.28-1.5')
-    assert Version('1:500') < Version('1:5000')
-    assert Version('100:500') > Version('11:5000')
-    assert Version('1.0.4-2') > Version('1.0pre7-2')
-    assert Version('1.5~rc1') < Version('1.5')
-    assert Version('1.5~rc1') < Version('1.5+b1')
-    assert Version('1.5~rc1') < Version('1.5~rc2')
-    assert Version('1.5~rc1') > Version('1.5~dev0')
-
-    # Release
-    assert intern_release('sarge') < intern_release('etch')
-
-    # PackageFile
-    # for p in PackageFile('../../data/packages/sarge/Sources'):
-    #     assert p[0][0] == 'Package'
-    # for p in PackageFile('../../data/packages/sarge/Packages.i386'):
-    #     assert p[0][0] == 'Package'
-
-    # Helper routines
-    assert read_lines_sha1([]) == 'da39a3ee5e6b4b0d3255bfef95601890afd80709'
-    assert read_lines_sha1(['1\n', '23\n']) \
-           == '14293c9bd646a15dc656eaf8fba95124020dfada'
-
-    file_a = map(lambda x: "%d\n" % x, range(1, 18))
-    file_b = ['0\n', '1\n', '<2>\n', '<3>\n', '4\n', '5\n', '7\n', '8\n',
-              '11\n', '12\n', '<13>\n', '14\n', '15\n', 'A\n', 'B\n', 'C\n',
-              '16\n', '17\n',]
-    patch = ['15a\n', 'A\n', 'B\n', 'C\n', '.\n', '13c\n', '<13>\n', '.\n',
-             '9,10d\n', '6d\n', '2,3c\n', '<2>\n', '<3>\n', '.\n', '0a\n',
-             '0\n', '.\n']
-    patch_lines(file_a, patches_from_ed_script(patch))
-    assert ''.join(file_b) == ''.join(file_a)
-
-    assert len(merge_as_sets([])) == 0
-    assert ''.join(merge_as_sets("abc", "cb")) == "abc"
-
-if __name__ == "__main__":
-    test()

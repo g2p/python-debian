@@ -1,3 +1,53 @@
+python-debian (0.1.15) unstable; urgency=low
+
+  [ John Wright ]
+  * deb822: Don't ignore leading newlines on field data with apt_pkg
+    (Closes: #466753)
+  * changelog: Consistently parse different types of inputs.  The
+    previous implementation added extra newlines when given a file
+    object as input, rather than the result of str.splitlines().
+    (Closes: #539316)
+  * deb822: Faster non-shared storage by keeping a TagFile object
+    around for each Deb822 object yielded
+
+  [ Stefano Zacchiroli ]
+  * make debian_support.Version hashable, patch from Piotr Ożarowski
+    (Closes: #543223)
+
+  [ Filippo Giunchedi ]
+  * changelog: add iterator over changelog blocks (Closes: #539334)
+  * changelog: split tests into tests/test_changelog.py for consistency
+
+  [ John Wright ]
+  * deb822: Use the apt_pkg.TagFile class instead of apt_pkg.ParseTagFile()
+    (Closes: #552190)
+  * test_deb822.py: Update to support new gpg "SIG_ID" algorithm
+  * deb822: Better support for non-ascii values.  Deb822 objects now
+    always contain unicode objects instead of strings.  Use the encoding
+    argument to Deb822's initializer and its iter_paragraphs class
+    method if the encoding of a file you are reading in is not utf-8.
+    (The dump method also takes an encoding argument, if you wish the
+    output not to be utf-8-encoded.) (Closes: #495272)
+  * Use the apt_pkg.TagFile iterator interface instead of hacking its
+    offset.  As of python-apt version 0.7.94, that interface doesn't use
+    shared storage. (Closes: #571470)
+  * debian_support: Add a native python Version class, based on Raphael
+    Hertzog's DpkgVersion class in the PTS (Closes: #562257, #573009)
+
+  [ Jelmer Vernooij ]
+  * Remove unused imports in the debfile and debtags modules
+
+  [ John Wright ]
+  * changelog: Use debian_support.Version directly
+  * Deprecate the 'debian_bundle' package in favor of a new 'debian'
+    package (Closes: #570210)
+  * debian_support: split tests into tests/test_debian_support.py for
+    consistency
+  * Convert to "3.0 (native)" source format and update Standards-Version
+    to 3.8.4 (no changes necessary)
+
+ -- John Wright <jsw@debian.org>  Sun, 14 Mar 2010 05:04:50 -0600
+
 python-debian (0.1.14) unstable; urgency=low
 
   [ Stefano Zacchiroli ]
