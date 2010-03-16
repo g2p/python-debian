@@ -1,3 +1,19 @@
+python-debian (0.1.16) unstable; urgency=low
+
+  * debian_support: Be more careful in case apt_pkg is not available
+    - If apt_pkg is not available, AptPkgVersion now raises
+      NotImplementedError on any initialization attempt
+    - test_debian_support.py now doesn't try to test AptPkgVersion if
+      apt_pkg is not availble
+  * test_deb822.py: Don't test gpg info if debian-keyring is not
+    available (Closes: #573934)
+  * Use the warnings system to report deprecation warnings
+    (Closes: #573945)
+  * Change examples and control file to refer to debian instead of
+    debian_bundle
+
+ -- John Wright <jsw@debian.org>  Mon, 15 Mar 2010 20:02:17 -0600
+
 python-debian (0.1.15) unstable; urgency=low
 
   [ John Wright ]
