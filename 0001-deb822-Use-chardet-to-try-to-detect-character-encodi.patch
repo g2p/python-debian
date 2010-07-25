@@ -1,0 +1,243 @@
+From c888992ee90e0e4cff61fedce395b7c40a0f2e8d Mon Sep 17 00:00:00 2001
+From: John Wright <jsw@debian.org>
+Date: Sat, 24 Jul 2010 23:57:07 -0700
+Subject: [PATCH] deb822: Use chardet to try to detect character encodings as necessary
+
+This is only used when the specified encoding doesn't work.  It's mainly
+useful for files containing multiple deb822 paragraphs with mixed
+encodings, like etch's Sources file.
+
+To make this consistent, the pure Python parser now just stores the raw
+string, putting off the unicode conversion until the user tries to get
+an item.
+---
+ debian/changelog                  |    4 ++++
+ debian/control                    |    4 ++--
+ lib/debian/deb822.py              |   37 +++++++++++++++++++++++++++----------
+ tests/test_Sources.mixed_encoding |   34 ++++++++++++++++++++++++++++++++++
+ tests/test_deb822.py              |   24 ++++++++++++++++++++++++
+ 5 files changed, 91 insertions(+), 12 deletions(-)
+ create mode 100644 tests/test_Sources.mixed_encoding
+
+diff --git a/debian/changelog b/debian/changelog
+index 9042957..2637242 100644
+--- a/debian/changelog
++++ b/debian/changelog
+@@ -5,6 +5,10 @@ python-debian (0.1.17) UNRELEASED; urgency=low
+ 
+   [ John Wright ]
+   * test_deb822.py: Make test_gpg_info more robust (Closes: #582878)
++  * deb822: Use chardet to try to detect character encodings as necessary
++    - This is only used when the specified encoding doesn't work.  It's mainly
++      useful for files containing multiple deb822 paragraphs with mixed
++      encodings, like etch's Sources file. (Closes: #586021)
+ 
+  -- John Wright <jsw@debian.org>  Fri, 25 Jun 2010 11:20:22 -0600
+ 
+diff --git a/debian/control b/debian/control
+index 3315ae7..d52ab3e 100644
+--- a/debian/control
++++ b/debian/control
+@@ -8,7 +8,7 @@ Uploaders: Adeodato Sim贸 <dato@net.com.org.es>,
+  Reinhard Tartler <siretart@tauware.de>,
+  Stefano Zacchiroli <zack@debian.org>,
+  John Wright <jsw@debian.org>
+-Build-Depends: debhelper (>= 5.0.37.2), python, python-setuptools
++Build-Depends: debhelper (>= 5.0.37.2), python, python-setuptools, python-chardet
+ Build-Depends-Indep: python-support (>= 0.3)
+ Standards-Version: 3.8.4
+ Vcs-Browser: http://git.debian.org/?p=pkg-python-debian/python-debian.git
+@@ -16,7 +16,7 @@ Vcs-Git: git://git.debian.org/git/pkg-python-debian/python-debian.git
+ 
+ Package: python-debian
+ Architecture: all
+-Depends: ${python:Depends}, ${misc:Depends}
++Depends: ${python:Depends}, ${misc:Depends}, python-chardet
+ Recommends: python-apt
+ Suggests: gpgv
+ Provides: python-deb822
+diff --git a/lib/debian/deb822.py b/lib/debian/deb822.py
+index 68af3d2..1a21e62 100644
+--- a/lib/debian/deb822.py
++++ b/lib/debian/deb822.py
+@@ -4,7 +4,7 @@
+ # (.changes, .dsc, Packages, Sources, etc)
+ #
+ # Copyright (C) 2005-2006  dann frazier <dannf@dannf.org>
+-# Copyright (C) 2006-2008  John Wright <john@johnwright.org>
++# Copyright (C) 2006-2010  John Wright <john@johnwright.org>
+ # Copyright (C) 2006       Adeodato Sim贸 <dato@net.com.org.es>
+ # Copyright (C) 2008       Stefano Zacchiroli <zack@upsilon.cc>
+ #
+@@ -30,10 +30,13 @@ try:
+ except ImportError:
+     _have_apt_pkg = False
+ 
++import chardet
+ import new
+ import re
+ import string
+ import sys
++import warnings
++
+ import StringIO
+ import UserDict
+ 
+@@ -176,7 +179,25 @@ class Deb822Dict(object, UserDict.DictMixin):
+ 
+         if isinstance(value, str):
+             # Always return unicode objects instead of strings
+-            value = value.decode(self.encoding)
++            try:
++                value = value.decode(self.encoding)
++            except UnicodeDecodeError, e:
++                # Evidently, the value wasn't encoded with the encoding the
++                # user specified.  Try detecting it.
++                warnings.warn('decoding from %s failed; attempting to detect '
++                              'the true encoding' % self.encoding,
++                              UnicodeWarning)
++                result = chardet.detect(value)
++                try:
++                    value = value.decode(result['encoding'])
++                except UnicodeDecodeError:
++                    raise e
++                else:
++                    # Assume the rest of the paragraph is in this encoding as
++                    # well (there's no sense in repeating this exercise for
++                    # every field).
++                    self.encoding = result['encoding']
++
+         return value
+ 
+     def __delitem__(self, key):
+@@ -306,33 +327,29 @@ class Deb822(Deb822Dict):
+         curkey = None
+         content = ""
+         for line in self.gpg_stripped_paragraph(sequence):
+-            if isinstance(line, str):
+-                line = line.decode(self.encoding)
+             m = single.match(line)
+             if m:
+                 if curkey:
+-                    self[curkey] += content
++                    self[curkey] = content
+ 
+                 if not wanted_field(m.group('key')):
+                     curkey = None
+                     continue
+ 
+                 curkey = m.group('key')
+-                self[curkey] = m.group('data')
+-                content = ""
++                content = m.group('data')
+                 continue
+ 
+             m = multi.match(line)
+             if m:
+                 if curkey:
+-                    self[curkey] += content
++                    self[curkey] = content
+ 
+                 if not wanted_field(m.group('key')):
+                     curkey = None
+                     continue
+ 
+                 curkey = m.group('key')
+-                self[curkey] = ""
+                 content = ""
+                 continue
+ 
+@@ -342,7 +359,7 @@ class Deb822(Deb822Dict):
+                 continue
+ 
+         if curkey:
+-            self[curkey] += content
++            self[curkey] = content
+ 
+     def __str__(self):
+         return self.dump()
+diff --git a/tests/test_Sources.mixed_encoding b/tests/test_Sources.mixed_encoding
+new file mode 100644
+index 0000000..af2f3ca
+--- /dev/null
++++ b/tests/test_Sources.mixed_encoding
+@@ -0,0 +1,34 @@
++Package: amarok
++Binary: amarok, amarok-engines, amarok-xine
++Version: 1.4.4-4etch1
++Priority: optional
++Section: kde
++Maintainer: Adeodato Sim贸 <dato@net.com.org.es>
++Build-Depends: cdbs, debhelper (>= 5), quilt, bzip2, automake1.9, libtool, kdelibs4-dev, kdemultimedia-dev, kdebase-dev, libxine-dev, libtag1-dev (>> 1.4), libsqlite3-dev, libtunepimp3-dev, libmysqlclient15-dev, libpq-dev, xmms-dev, libvisual-0.4-dev, libsdl1.2-dev, libifp-dev, libusb-dev, libgpod-dev, libnjb-dev, ruby, ruby1.8-dev, dpkg-dev (>= 1.13.19)
++Architecture: any
++Standards-Version: 3.7.2
++Format: 1.0
++Directory: pool/main/a/amarok
++Files:
++ f8e80af55fbd8386e6b13b0b12d798f4 986 amarok_1.4.4-4etch1.dsc
++ 0adbbd8373da2198b80e509618a2dab9 17628566 amarok_1.4.4.orig.tar.gz
++ c29b0538c033ededacc6d31339d17700 42402 amarok_1.4.4-4etch1.diff.gz
++Uploaders: Ana Beatriz Guerrero Lopez <ana@debian.org>
++
++Package: texinfo
++Binary: texinfo, info
++Version: 4.8.dfsg.1-4
++Priority: important
++Section: doc
++Maintainer: Norbert Preining <preining@debian.org>
++Build-Depends: debhelper (>= 5), dpatch, libncurses5-dev | libncurses-dev, gettext
++Architecture: any
++Standards-Version: 3.7.2
++Format: 1.0
++Directory: pool/main/t/texinfo
++Files:
++ 2c233d2bf6627eac32deb9bb87726ea1 680 texinfo_4.8.dfsg.1-4.dsc
++ 614273ac8568a25926aae374cd9a6683 1926534 texinfo_4.8.dfsg.1.orig.tar.gz
++ e01520524bc114d90a2a1e5eefe71b50 101211 texinfo_4.8.dfsg.1-4.diff.gz
++Uploaders: Frank K黶ter <frank@debian.org>
++
+diff --git a/tests/test_deb822.py b/tests/test_deb822.py
+index f6adcfd..891f4cd 100755
+--- a/tests/test_deb822.py
++++ b/tests/test_deb822.py
+@@ -21,6 +21,7 @@ import os
+ import re
+ import sys
+ import unittest
++import warnings
+ from StringIO import StringIO
+ 
+ sys.path.insert(0, '../lib/debian/')
+@@ -702,6 +703,29 @@ Description: python modules to work with Debian-related data formats
+         self.assertEqual(utf8_contents, latin1_to_utf8.getvalue())
+         self.assertEqual(latin1_contents, utf8_to_latin1.getvalue())
+ 
++    def test_mixed_encodings(self):
++        """Test that we can handle a simple case of mixed encodings
++
++        In general, this isn't guaranteed to work.  It uses the chardet
++        package, which tries to determine heuristically the encoding of the
++        text given to it.  But as far as I've seen, it's reliable for mixed
++        latin1 and utf-8 in maintainer names in old Sources files...
++        """
++
++        # Avoid spitting out the encoding warning during testing.
++        warnings.filterwarnings(action='ignore', category=UnicodeWarning)
++
++        filename = 'test_Sources.mixed_encoding'
++        for paragraphs in [deb822.Sources.iter_paragraphs(file(filename)),
++                           deb822.Sources.iter_paragraphs(file(filename),
++                                                          use_apt_pkg=False)]:
++            p1 = paragraphs.next()
++            self.assertEqual(p1['maintainer'],
++                             u'Adeodato Sim贸 <dato@net.com.org.es>')
++            p2 = paragraphs.next()
++            self.assertEqual(p2['uploaders'],
++                             u'Frank K眉ster <frank@debian.org>')
++
+ class TestPkgRelations(unittest.TestCase):
+ 
+     def test_packages(self):
+-- 
+1.7.1
+
