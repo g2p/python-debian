@@ -1,3 +1,10 @@
+python-debian (0.1.18) unstable; urgency=low
+
+  * Support installation together with older versions of python-apt.
+    Original patch by Jelmer Vernooij. (Closes: #590805)
+
+ -- John Wright <jsw@debian.org>  Wed, 04 Aug 2010 01:16:52 -0700
+
 python-debian (0.1.17) unstable; urgency=low
 
   [ James Westby ]
