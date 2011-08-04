@@ -20,6 +20,7 @@
 import os
 import re
 import sys
+import tempfile
 import unittest
 import warnings
 from StringIO import StringIO
@@ -236,6 +237,47 @@ iD8DBQFIGWQO0UIZh3p4ZWERAug/AJ93DWD9o+1VMgPDjWn/dsmPSgTWGQCeOfZi
 -----END PGP SIGNATURE-----
 '''
 
+UNPARSED_PARAGRAPHS_WITH_COMMENTS = '''\
+# Leading comments should be ignored.
+
+Source: foo
+Section: bar
+# An inline comment in the middle of a paragraph should be ignored.
+Priority: optional
+Homepage: http://www.debian.org/
+
+# Comments in the middle shouldn't result in extra blank paragraphs either.
+
+# Ditto.
+
+# A comment at the top of a paragraph should be ignored.
+Package: foo
+Architecture: any
+Description: An awesome package
+  # This should still appear in the result.
+  Blah, blah, blah. # So should this.
+# A comment at the end of a paragraph should be ignored.
+
+# Trailing comments shouldn't cause extra blank paragraphs.
+'''
+
+PARSED_PARAGRAPHS_WITH_COMMENTS = [
+    deb822.Deb822Dict([
+        ('Source', 'foo'),
+        ('Section', 'bar'),
+        ('Priority', 'optional'),
+        ('Homepage', 'http://www.debian.org/'),
+    ]),
+    deb822.Deb822Dict([
+        ('Package', 'foo'),
+        ('Architecture', 'any'),
+        ('Description', 'An awesome package\n'
+            '  # This should still appear in the result.\n'
+            '  Blah, blah, blah. # So should this.'),
+    ]),
+]
+
+
 class TestDeb822Dict(unittest.TestCase):
     def make_dict(self):
         d = deb822.Deb822Dict()
@@ -396,10 +438,10 @@ class TestDeb822(unittest.TestCase):
                 self.assertWellParsed(d, PARSED_PACKAGE)
             self.assertEqual(count, 2)
 
-    def _test_iter_paragraphs(self, file, cls, **kwargs):
+    def _test_iter_paragraphs(self, filename, cls, **kwargs):
         """Ensure iter_paragraphs consistency"""
         
-        f = open(file)
+        f = open(filename)
         packages_content = f.read()
         f.close()
         # XXX: The way multivalued fields parsing works, we can't guarantee
@@ -409,10 +451,12 @@ class TestDeb822(unittest.TestCase):
 
         s = StringIO()
         l = []
-        for p in cls.iter_paragraphs(open(file), **kwargs):
+        f = open(filename)
+        for p in cls.iter_paragraphs(f, **kwargs):
             p.dump(s)
             s.write("\n")
             l.append(p)
+        f.close()
         self.assertEqual(s.getvalue(), packages_content)
         if kwargs["shared_storage"] is False:
             # If shared_storage is False, data should be consistent across
@@ -726,6 +770,58 @@ Description: python modules to work with Debian-related data formats
             self.assertEqual(p2['uploaders'],
                              u'Frank Küster <frank@debian.org>')
 
+    def test_bug597249_colon_as_first_value_character(self):
+        """Colon should be allowed as the first value character. See #597249.
+        """
+
+        data = 'Foo: : bar'
+        parsed = {'Foo': ': bar'}
+        self.assertWellParsed(deb822.Deb822(data), parsed)
+
+    @staticmethod
+    def _dictset(d, key, value):
+        d[key] = value
+
+    def test_field_value_ends_in_newline(self):
+        """Field values are not allowed to end with newlines"""
+
+        d = deb822.Deb822()
+        self.assertRaises(ValueError, self._dictset, d, 'foo', 'bar\n')
+        self.assertRaises(ValueError, self._dictset, d, 'foo', 'bar\nbaz\n')
+
+    def test_field_value_contains_blank_line(self):
+        """Field values are not allowed to contain blank lines"""
+
+        d = deb822.Deb822()
+        self.assertRaises(ValueError, self._dictset, d, 'foo', 'bar\n\nbaz')
+        self.assertRaises(ValueError, self._dictset, d, 'foo', '\n\nbaz')
+
+    def test_multivalued_field_contains_newline(self):
+        """Multivalued field components are not allowed to contain newlines"""
+
+        d = deb822.Dsc()
+        # We don't check at set time, since one could easily modify the list
+        # without deb822 knowing.  We instead check at get time.
+        d['Files'] = [{'md5sum': 'deadbeef', 'size': '9605', 'name': 'bad\n'}]
+        self.assertRaises(ValueError, d.get_as_string, 'files')
+
+    def _test_iter_paragraphs_comments(self, paragraphs):
+        self.assertEqual(len(paragraphs), len(PARSED_PARAGRAPHS_WITH_COMMENTS))
+        for i in range(len(paragraphs)):
+            self.assertWellParsed(paragraphs[i],
+                                  PARSED_PARAGRAPHS_WITH_COMMENTS[i])
+
+    def test_iter_paragraphs_comments_use_apt_pkg(self):
+        paragraphs = list(deb822.Deb822.iter_paragraphs(
+            UNPARSED_PARAGRAPHS_WITH_COMMENTS.splitlines(), use_apt_pkg=True))
+        self._test_iter_paragraphs_comments(paragraphs)
+
+    def test_iter_paragraphs_comments_native(self):
+        paragraphs = list(deb822.Deb822.iter_paragraphs(
+            UNPARSED_PARAGRAPHS_WITH_COMMENTS.splitlines(), use_apt_pkg=False))
+        self._test_iter_paragraphs_comments(paragraphs)
+
+
 class TestPkgRelations(unittest.TestCase):
 
     def test_packages(self):
@@ -843,6 +939,79 @@ class TestPkgRelations(unittest.TestCase):
                     [{'name': 'binutils-doc', 'version': None, 'arch': None}],
                     [{'name': 'binutils-source', 'version': None, 'arch': None}]]}
         self.assertEqual(rel2, pkg2.relations)
+
+
+class TestGpgInfo(unittest.TestCase):
+
+    def setUp(self):
+        # These tests can only run with gpgv and a keyring available.  When we
+        # can use Python >= 2.7, we can use the skip decorator; for now just
+        # check in each test method whether we should actually run.
+        self.should_run = (
+            os.path.exists('/usr/bin/gpgv') and
+            os.path.exists('/usr/share/keyrings/debian-keyring.gpg'))
+
+        self.data = SIGNED_CHECKSUM_CHANGES_FILE % CHECKSUM_CHANGES_FILE
+        self.valid = {
+            'GOODSIG':
+                ['D14219877A786561', 'John Wright <john.wright@hp.com>'],
+            'VALIDSIG':
+                ['8FEFE900783CF175827C2F65D14219877A786561', '2008-05-01',
+                 '1209623566', '0', '3', '0', '17', '2', '01',
+                 '8FEFE900783CF175827C2F65D14219877A786561'],
+            'SIG_ID':
+                ['j3UjSpdky92fcQISbm8W5PlwC/g', '2008-05-01', '1209623566'],
+        }
+
+    def _validate_gpg_info(self, gpg_info):
+        # The second part of the GOODSIG field could change if the primary
+        # uid changes, so avoid checking that.  Also, the first part of the
+        # SIG_ID field has undergone at least one algorithm changein gpg,
+        # so don't bother testing that either.
+        self.assertEqual(set(gpg_info.keys()), set(self.valid.keys()))
+        self.assertEqual(gpg_info['GOODSIG'][0], self.valid['GOODSIG'][0])
+        self.assertEqual(gpg_info['VALIDSIG'], self.valid['VALIDSIG'])
+        self.assertEqual(gpg_info['SIG_ID'][1:], self.valid['SIG_ID'][1:])
+
+    def test_from_sequence_string(self):
+        if not self.should_run:
+            return
+
+        gpg_info = deb822.GpgInfo.from_sequence(self.data)
+        self._validate_gpg_info(gpg_info)
+
+    def test_from_sequence_newline_terminated(self):
+        if not self.should_run:
+            return
+
+        sequence = StringIO(self.data)
+        gpg_info = deb822.GpgInfo.from_sequence(sequence)
+        self._validate_gpg_info(gpg_info)
+
+    def test_from_sequence_no_newlines(self):
+        if not self.should_run:
+            return
+
+        sequence = self.data.splitlines()
+        gpg_info = deb822.GpgInfo.from_sequence(sequence)
+        self._validate_gpg_info(gpg_info)
+
+    def test_from_file(self):
+        if not self.should_run:
+            return
+
+        fd, filename = tempfile.mkstemp()
+        fp = os.fdopen(fd, 'w')
+        fp.write(self.data)
+        fp.close()
+
+        try:
+            gpg_info = deb822.GpgInfo.from_file(filename)
+        finally:
+            os.remove(filename)
+
+        self._validate_gpg_info(gpg_info)
+
 
 if __name__ == '__main__':
     unittest.main()

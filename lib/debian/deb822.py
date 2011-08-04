@@ -33,14 +33,20 @@ except (ImportError, AttributeError):
     _have_apt_pkg = False
 
 import chardet
-import new
+import os
 import re
 import string
+import subprocess
 import sys
 import warnings
 
 import StringIO
 import UserDict
+
+
+GPGV_DEFAULT_KEYRINGS = frozenset(['/usr/share/keyrings/debian-keyring.gpg'])
+GPGV_EXECUTABLE = '/usr/bin/gpgv'
+
 
 class TagSectionWrapper(object, UserDict.DictMixin):
     """Wrap a TagSection object, using its find_raw method to get field values
@@ -53,7 +59,8 @@ class TagSectionWrapper(object, UserDict.DictMixin):
         self.__section = section
 
     def keys(self):
-        return self.__section.keys()
+        return [key for key in self.__section.keys()
+                if not key.startswith('#')]
 
     def __getitem__(self, key):
         s = self.__section.find_raw(key)
@@ -68,6 +75,7 @@ class TagSectionWrapper(object, UserDict.DictMixin):
         # Get rid of spaces and tabs after the ':', but not newlines, and strip
         # off any newline at the end of the data.
         return data.lstrip(' \t').rstrip('\n')
+
 
 class OrderedSet(object):
     """A set-like object that preserves order when iterating over it
@@ -111,6 +119,7 @@ class OrderedSet(object):
         for item in iterable:
             self.add(item)
     ###
+
 
 class Deb822Dict(object, UserDict.DictMixin):
     # Subclassing UserDict.DictMixin because we're overriding so much dict
@@ -302,8 +311,11 @@ class Deb822(Deb822Dict):
         if _have_apt_pkg and use_apt_pkg and isinstance(sequence, file):
             parser = apt_pkg.TagFile(sequence)
             for section in parser:
-                yield cls(fields=fields, _parsed=TagSectionWrapper(section),
-                          encoding=encoding)
+                paragraph = cls(fields=fields,
+                                _parsed=TagSectionWrapper(section),
+                                encoding=encoding)
+                if paragraph:
+                    yield paragraph
 
         else:
             iterable = iter(sequence)
@@ -316,10 +328,28 @@ class Deb822(Deb822Dict):
 
     ###
 
+    @staticmethod
+    def _skip_useless_lines(sequence):
+        """Yields only lines that do not begin with '#'.
+
+        Also skips any blank lines at the beginning of the input.
+        """
+        at_beginning = True
+        for line in sequence:
+            if line.startswith('#'):
+                continue
+            if at_beginning:
+                if not line.rstrip('\r\n'):
+                    continue
+                at_beginning = False
+            yield line
+
     def _internal_parser(self, sequence, fields=None):
-        single = re.compile("^(?P<key>\S+)\s*:\s*(?P<data>\S.*?)\s*$")
-        multi = re.compile("^(?P<key>\S+)\s*:\s*$")
-        multidata = re.compile("^\s(?P<data>.+?)\s*$")
+        # The key is non-whitespace, non-colon characters before any colon.
+        key_part = r"^(?P<key>[^: \t\n\r\f\v]+)\s*:\s*"
+        single = re.compile(key_part + r"(?P<data>\S.*?)\s*$")
+        multi = re.compile(key_part + r"$")
+        multidata = re.compile(r"^\s(?P<data>.+?)\s*$")
 
         wanted_field = lambda f: fields is None or f in fields
 
@@ -328,7 +358,9 @@ class Deb822(Deb822Dict):
 
         curkey = None
         content = ""
-        for line in self.gpg_stripped_paragraph(sequence):
+
+        for line in self.gpg_stripped_paragraph(
+                self._skip_useless_lines(sequence)):
             m = single.match(line)
             if m:
                 if curkey:
@@ -406,8 +438,9 @@ class Deb822(Deb822Dict):
             value = self.get_as_string(key)
             if not value or value[0] == '\n':
                 # Avoid trailing whitespace after "Field:" if it's on its own
-                # line or the value is empty
-                # XXX Uh, really print value if value == '\n'?
+                # line or the value is empty.  We don't have to worry about the
+                # case where value == '\n', since we ensure that is not the
+                # case in __setitem__.
                 entry = '%s:%s\n' % (key, value)
             else:
                 entry = '%s: %s\n' % (key, value)
@@ -571,11 +604,14 @@ class Deb822(Deb822Dict):
 
     gpg_stripped_paragraph = classmethod(gpg_stripped_paragraph)
 
-    def get_gpg_info(self):
+    def get_gpg_info(self, keyrings=None):
         """Return a GpgInfo object with GPG signature information
 
         This method will raise ValueError if the signature is not available
-        (e.g. the original text cannot be found)"""
+        (e.g. the original text cannot be found).
+
+        :param keyrings: list of keyrings to use (see GpgInfo.from_sequence)
+        """
 
         # raw_text is saved (as a string) only for Changes and Dsc (see
         # _gpg_multivalued.__init__) which is small compared to Packages or
@@ -584,11 +620,36 @@ class Deb822(Deb822Dict):
             raise ValueError, "original text cannot be found"
 
         if self.gpg_info is None:
-            self.gpg_info = GpgInfo.from_sequence(self.raw_text)
+            self.gpg_info = GpgInfo.from_sequence(self.raw_text,
+                                                  keyrings=keyrings)
 
         return self.gpg_info
 
-###
+    def validate_input(self, key, value):
+        """Raise ValueError if value is not a valid value for key
+
+        Subclasses that do interesting things for different keys may wish to
+        override this method.
+        """
+
+        # The value cannot end in a newline (if it did, dumping the object
+        # would result in multiple stanzas)
+        if value.endswith('\n'):
+            raise ValueError("value must not end in '\\n'")
+
+        # Make sure there are no blank lines (actually, the first one is
+        # allowed to be blank, but no others), and each subsequent line starts
+        # with whitespace
+        for line in value.splitlines()[1:]:
+            if not line:
+                raise ValueError("value must not have blank lines")
+            if not line[0].isspace():
+                raise ValueError("each line must start with whitespace")
+
+    def __setitem__(self, key, value):
+        self.validate_input(key, value)
+        Deb822Dict.__setitem__(self, key, value)
+
 
 # XXX check what happens if input contains more that one signature
 class GpgInfo(dict):
@@ -612,14 +673,14 @@ class GpgInfo(dict):
         """Return the primary ID of the signee key, None is not available"""
         pass
 
-    @staticmethod
-    def from_output(out, err=None):
+    @classmethod
+    def from_output(cls, out, err=None):
         """Create a new GpgInfo object from gpg(v) --status-fd output (out) and
         optionally collect stderr as well (err).
         
         Both out and err can be lines in newline-terminated sequence or regular strings."""
 
-        n = GpgInfo()
+        n = cls()
 
         if isinstance(out, basestring):
             out = out.split('\n')
@@ -640,7 +701,7 @@ class GpgInfo(dict):
             # str.partition() would be better, 2.5 only though
             s = l.find(' ')
             key = l[:s]
-            if key in GpgInfo.uidkeys:
+            if key in cls.uidkeys:
                 # value is "keyid UID", don't split UID
                 value = l[s+1:].split(' ', 1)
             else:
@@ -649,42 +710,69 @@ class GpgInfo(dict):
             n[key] = value
         return n 
 
-# XXX how to handle sequences of lines? file() returns \n-terminated
-    @staticmethod
-    def from_sequence(sequence, keyrings=['/usr/share/keyrings/debian-keyring.gpg'],
-            executable=["/usr/bin/gpgv"]):
+    @classmethod
+    def from_sequence(cls, sequence, keyrings=None, executable=None):
         """Create a new GpgInfo object from the given sequence.
 
-        Sequence is a sequence of lines or a string
-        executable is a list of args for subprocess.Popen, the first element being the gpg executable"""
+        :param sequence: sequence of lines or a string
+
+        :param keyrings: list of keyrings to use (default:
+            ['/usr/share/keyrings/debian-keyring.gpg'])
+
+        :param executable: list of args for subprocess.Popen, the first element
+            being the gpgv executable (default: ['/usr/bin/gpgv'])
+        """
+
+        keyrings = keyrings or GPGV_DEFAULT_KEYRINGS
+        executable = executable or [GPGV_EXECUTABLE]
 
         # XXX check for gpg as well and use --verify accordingly?
-        args = executable
+        args = list(executable)
         #args.extend(["--status-fd", "1", "--no-default-keyring"])
         args.extend(["--status-fd", "1"])
-        import os
-        [args.extend(["--keyring", k]) for k in keyrings if os.path.isfile(k) and os.access(k, os.R_OK)]
+        for k in keyrings:
+            args.extend(["--keyring", k])
         
         if "--keyring" not in args:
             raise IOError, "cannot access any of the given keyrings"
 
-        import subprocess
-        p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        p = subprocess.Popen(args, stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         # XXX what to do with exit code?
 
         if isinstance(sequence, basestring):
             (out, err) = p.communicate(sequence)
         else:
-            (out, err) = p.communicate("\n".join(sequence))
+            (out, err) = p.communicate(cls._get_full_string(sequence))
 
-        return GpgInfo.from_output(out, err)
+        return cls.from_output(out, err)
 
     @staticmethod
-    def from_file(target, *args):
-        """Create a new GpgInfo object from the given file, calls from_sequence(file(target), *args)"""
-        return from_sequence(file(target), *args)
-    
-###
+    def _get_full_string(sequence):
+        """Return a string from a sequence of lines.
+
+        This method detects if the sequence's lines are newline-terminated, and
+        constructs the string appropriately.
+        """
+        # Peek at the first line to see if it's newline-terminated.
+        sequence_iter = iter(sequence)
+        try:
+            first_line = sequence_iter.next()
+        except StopIteration:
+            return ""
+        join_str = '\n'
+        if first_line.endswith('\n'):
+            join_str = ''
+        return first_line + join_str + join_str.join(sequence_iter)
+
+    @classmethod
+    def from_file(cls, target, *args, **kwargs):
+        """Create a new GpgInfo object from the given file.
+
+        See GpgInfo.from_sequence.
+        """
+        return cls.from_sequence(file(target), *args, **kwargs)
+
 
 class PkgRelation(object):
     """Inter-package relationships
@@ -864,6 +952,7 @@ class _PkgRelationMixin(object):
             self.__parsed_relations = True
         return self.__relations
 
+
 class _multivalued(Deb822):
     """A class with (R/W) support for multivalued fields.
 
@@ -892,6 +981,16 @@ class _multivalued(Deb822):
             for line in filter(None, contents.splitlines()):
                 updater_method(Deb822Dict(zip(fields, line.split())))
 
+    def validate_input(self, key, value):
+        if key.lower() in self._multivalued_fields:
+            # It's difficult to write a validator for multivalued fields, and
+            # basically futile, since we allow mutable lists.  In any case,
+            # with sanity checking in get_as_string, we shouldn't ever output
+            # unparseable data.
+            pass
+        else:
+            Deb822.validate_input(self, key, value)
+
     def get_as_string(self, key):
         keyl = key.lower()
         if keyl in self._multivalued_fields:
@@ -909,20 +1008,21 @@ class _multivalued(Deb822):
                 field_lengths = {}
             for item in array:
                 for x in order:
-                    raw_value = str(item[x])
+                    raw_value = unicode(item[x])
                     try:
                         length = field_lengths[keyl][x]
                     except KeyError:
                         value = raw_value
                     else:
                         value = (length - len(raw_value)) * " " + raw_value
+                    if "\n" in value:
+                        raise ValueError("'\\n' not allowed in component of "
+                                         "multivalued field %s" % key)
                     fd.write(" %s" % value)
                 fd.write("\n")
             return fd.getvalue().rstrip("\n")
         else:
             return Deb822.get_as_string(self, key)
-
-###
 
 
 class _gpg_multivalued(_multivalued):
@@ -1101,7 +1201,6 @@ class Packages(Deb822, _PkgRelationMixin):
         Deb822.__init__(self, *args, **kwargs)
         _PkgRelationMixin.__init__(self, *args, **kwargs)
 
-###
 
 class _CaseInsensitiveString(str):
     """Case insensitive string.
@@ -1121,5 +1220,6 @@ class _CaseInsensitiveString(str):
 
     def lower(self):
         return self.str_lower
+
 
 _strI = _CaseInsensitiveString

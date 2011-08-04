@@ -1,3 +1,32 @@
+python-debian (0.1.21) unstable; urgency=low
+
+  [ Tshepang Lekhonkhobe ]
+  * test_changelog.py: Close open files. (Closes: #625672)
+
+  [ John Wright ]
+  * deb822: Allow ':' as the first character of a value.
+    (Closes: #597249)
+  * deb822: Avoid dumping unparseable data. (Closes: #597120)
+  * Clean up deb822.GpgInfo implementation:
+    - Change several @staticmethod decorated methods to @classmethod,
+      since they call the class constructor.
+    - from_sequence now can accept both sequences of newline-terminated
+      strings and the output of str.splitlines().
+    - from_file now actually calls the from_sequence method.
+      (Closes: #627058)
+    - from_sequence now makes a copy of the initial args list before
+      extending it. (Closes: #627060)
+    - Keyrings are no longer checked for accessibility, since gpgv can
+      accept keyring arguments that are under the GnuPG home directory,
+      regardless of the current directory. (Closes: #627063)
+  * deb822.Deb822.gpg_info takes an optional keyrings argument.
+  * deb822: Don't interpret lines starting with '#'. (Closes: #632306)
+
+  [ Colin Watson ]
+  * Use dh_python2 instead of python-support. (Closes: #631392)
+
+ -- John Wright <jsw@debian.org>  Wed, 03 Aug 2011 23:07:17 -0700
+
 python-debian (0.1.20) unstable; urgency=low
 
   * Fix FTBFS, caused by referring to apt_pkg in a test with no
