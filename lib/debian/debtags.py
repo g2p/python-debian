@@ -15,9 +15,17 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import re, cPickle
+from __future__ import absolute_import, print_function
 
-from deprecation import function_deprecated_by
+import re
+try:
+    import cPickle as pickle
+except ImportError:
+    import pickle
+
+import six
+
+from debian.deprecation import function_deprecated_by
 
 def parse_tags(input):
 	lre = re.compile(r"^(.+?)(?::?\s*|:\s+(.+?)\s*)$")
@@ -51,7 +59,7 @@ def read_tag_database_reversed(input):
 	for pkgs, tags in parse_tags(input):
 		# Create the tag set using the native set
 		for tag in tags:
-			if db.has_key(tag):
+			if tag in db:
 				db[tag] |= pkgs
 			else:
 				db[tag] = pkgs.copy()
@@ -72,7 +80,7 @@ def read_tag_database_both_ways(input, tag_filter = None):
 		for pkg in pkgs:
 			db[pkg] = tags.copy()
 		for tag in tags:
-			if dbr.has_key(tag):
+			if tag in dbr:
 				dbr[tag] |= pkgs
 			else:
 				dbr[tag] = pkgs.copy()
@@ -85,7 +93,7 @@ def reverse(db):
 	res = {}
 	for pkg, tags in db.items():
 		for tag in tags:
-			if not res.has_key(tag):
+			if tag not in res:
 				res[tag] = set()
 			res[tag].add(pkg)
 	return res
@@ -96,7 +104,7 @@ def output(db):
 	for pkg, tags in db.items():
 		# Using % here seems awkward to me, but if I use calls to
 		# sys.stdout.write it becomes a bit slower
-		print "%s:" % (pkg), ", ".join(tags)
+		print("%s:" % (pkg), ", ".join(tags))
 
 
 def relevance_index_function(full, sub):
@@ -154,18 +162,18 @@ class DB:
 
 	def qwrite(self, file):
 		"Quickly write the data to a pickled file"
-		cPickle.dump(self.db, file)
-		cPickle.dump(self.rdb, file)
+		pickle.dump(self.db, file)
+		pickle.dump(self.rdb, file)
 
 	def qread(self, file):
 		"Quickly read the data from a pickled file"
-		self.db = cPickle.load(file)
-		self.rdb = cPickle.load(file)
+		self.db = pickle.load(file)
+		self.rdb = pickle.load(file)
 
 	def insert(self, pkg, tags):
 		self.db[pkg] = tags.copy()
 		for tag in tags:
-			if self.rdb.has_key(tag):
+			if tag in self.rdb:
 				self.rdb[tag].add(pkg)
 			else:
 				self.rdb[tag] = set((pkg))
@@ -229,7 +237,7 @@ class DB:
 		res = DB()
 		db = {}
 		for pkg in package_iter:
-			if self.db.has_key(pkg): db[pkg] = self.db[pkg]
+			if pkg in self.db: db[pkg] = self.db[pkg]
 		res.db = db
 		res.rdb = reverse(db)
 		return res
@@ -259,7 +267,7 @@ class DB:
 		"""
 		res = DB()
 		db = {}
-		for pkg in filter(package_filter, self.db.iterkeys()):
+		for pkg in filter(package_filter, six.iterkeys(self.db)):
 			db[pkg] = self.db[pkg]
 		res.db = db
 		res.rdb = reverse(db)
@@ -275,7 +283,7 @@ class DB:
 		"""
 		res = DB()
 		db = {}
-		for pkg in filter(filter, self.db.iterkeys()):
+		for pkg in filter(filter, six.iterkeys(self.db)):
 			db[pkg] = self.db[pkg].copy()
 		res.db = db
 		res.rdb = reverse(db)
@@ -291,7 +299,7 @@ class DB:
 		"""
 		res = DB()
 		db = {}
-		for pkg, tags in filter(package_tag_filter, self.db.iteritems()):
+		for pkg, tags in filter(package_tag_filter, six.iteritems(self.db)):
 			db[pkg] = self.db[pkg]
 		res.db = db
 		res.rdb = reverse(db)
@@ -307,7 +315,7 @@ class DB:
 		"""
 		res = DB()
 		db = {}
-		for pkg, tags in filter(package_tag_filter, self.db.iteritems()):
+		for pkg, tags in filter(package_tag_filter, six.iteritems(self.db)):
 			db[pkg] = self.db[pkg].copy()
 		res.db = db
 		res.rdb = reverse(db)
@@ -323,7 +331,7 @@ class DB:
 		"""
 		res = DB()
 		rdb = {}
-		for tag in filter(tag_filter, self.rdb.iterkeys()):
+		for tag in filter(tag_filter, six.iterkeys(self.rdb)):
 			rdb[tag] = self.rdb[tag]
 		res.rdb = rdb
 		res.db = reverse(rdb)
@@ -339,7 +347,7 @@ class DB:
 		"""
 		res = DB()
 		rdb = {}
-		for tag in filter(tag_filter, self.rdb.iterkeys()):
+		for tag in filter(tag_filter, six.iterkeys(self.rdb)):
 			rdb[tag] = self.rdb[tag].copy()
 		res.rdb = rdb
 		res.db = reverse(rdb)
@@ -349,25 +357,25 @@ class DB:
 
 	def has_package(self, pkg):
 		"""Check if the collection contains the given package"""
-		return self.db.has_key(pkg)
+		return pkg in self.db
 
 	hasPackage = function_deprecated_by(has_package)
 
 	def has_tag(self, tag):
 		"""Check if the collection contains packages tagged with tag"""
-		return self.rdb.has_key(tag)
+		return tag in self.rdb
 
 	hasTag = function_deprecated_by(has_tag)
 
 	def tags_of_package(self, pkg):
 		"""Return the tag set of a package"""
-		return self.db.has_key(pkg) and self.db[pkg] or set()
+		return pkg in self.db and self.db[pkg] or set()
 
 	tagsOfPackage = function_deprecated_by(tags_of_package)
 
 	def packages_of_tag(self, tag):
 		"""Return the package set of a tag"""
-		return self.rdb.has_key(tag) and self.rdb[tag] or set()
+		return tag in self.rdb and self.rdb[tag] or set()
 
 	packagesOfTag = function_deprecated_by(packages_of_tag)
 
@@ -399,7 +407,7 @@ class DB:
 		"""
 		Return the cardinality of a tag
 		"""
-		return self.rdb.has_key(tag) and len(self.rdb[tag]) or 0
+		return tag in self.rdb and len(self.rdb[tag]) or 0
 
 	def discriminance(self, tag):
 		"""
@@ -416,25 +424,25 @@ class DB:
 
 	def iter_packages(self):
 		"""Iterate over the packages"""
-		return self.db.iterkeys()
+		return six.iterkeys(self.db)
 
 	iterPackages = function_deprecated_by(iter_packages)
 
 	def iter_tags(self):
 		"""Iterate over the tags"""
-		return self.rdb.iterkeys()
+		return six.iterkeys(self.rdb)
 
 	iterTags = function_deprecated_by(iter_tags)
 
 	def iter_packages_tags(self):
 		"""Iterate over 2-tuples of (pkg, tags)"""
-		return self.db.iteritems()
+		return six.iteritems(self.db)
 
 	iterPackagesTags = function_deprecated_by(iter_packages_tags)
 
 	def iter_tags_packages(self):
 		"""Iterate over 2-tuples of (tag, pkgs)"""
-		return self.rdb.iteritems()
+		return six.iteritems(self.rdb)
 
 	iterTagsPackages = function_deprecated_by(iter_tags_packages)
 

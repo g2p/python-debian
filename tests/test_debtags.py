@@ -17,16 +17,19 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
+from __future__ import absolute_import
+
 import sys
 import unittest
 
-sys.path.insert(0, '../lib/debian/')
-import debtags
+sys.path.insert(0, '../lib/')
+from debian import debtags
 
 class TestDebtags(unittest.TestCase):
     def mkdb(self):
         db = debtags.DB()
-        db.read(open("test_tagdb", "r"))
+        with open("test_tagdb", "r") as f:
+            db.read(f)
         return db
 
     def test_insert(self):

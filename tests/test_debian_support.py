@@ -18,13 +18,15 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
+from __future__ import absolute_import
+
 import sys
 import unittest
 
-sys.path.insert(0, '../lib/debian/')
+sys.path.insert(0, '../lib/')
 
-import debian_support
-from debian_support import *
+from debian import debian_support
+from debian.debian_support import *
 
 
 class VersionTests(unittest.TestCase):
@@ -141,7 +143,7 @@ class VersionTests(unittest.TestCase):
             v1 = cls1(v1_str)
             v2 = cls2(v2_str)
             truth_fn = self._get_truth_fn(cmp_oper)
-            self.failUnless(truth_fn(v1, v2) == True,
+            self.assertTrue(truth_fn(v1, v2) == True,
                             "%r %s %r != True" % (v1, cmp_oper, v2))
 
     def test_comparisons(self):
@@ -174,7 +176,7 @@ class ReleaseTests(unittest.TestCase):
     """Tests for debian_support.Release"""
 
     def test_comparison(self):
-        self.assert_(intern_release('sarge') < intern_release('etch'))
+        self.assertTrue(intern_release('sarge') < intern_release('etch'))
 
 
 class HelperRoutineTests(unittest.TestCase):
@@ -187,7 +189,7 @@ class HelperRoutineTests(unittest.TestCase):
                          '14293c9bd646a15dc656eaf8fba95124020dfada')
 
     def test_patch_lines(self):
-        file_a = map(lambda x: "%d\n" % x, range(1, 18))
+        file_a = ["%d\n" % x for x in range(1, 18)]
         file_b = ['0\n', '1\n', '<2>\n', '<3>\n', '4\n', '5\n', '7\n', '8\n',
                   '11\n', '12\n', '<13>\n', '14\n', '15\n', 'A\n', 'B\n',
                   'C\n', '16\n', '17\n',]

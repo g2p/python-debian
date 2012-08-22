@@ -9,6 +9,8 @@
 
 # Navigate among related Debian packages
 
+from __future__ import print_function
+
 import sys
 
 # Requires python-extractor, python-magic and python-debtags
@@ -73,7 +75,7 @@ if __name__ == '__main__':
 		# Divide every tag score by the number of packages in the trail,
 		# obtaining a 'tag weight'.  A package can be later scored by summing
 		# the weight of all its tags.
-		for tag in tagscores.iterkeys():
+		for tag in tagscores:
 			tagscores[tag] = float(tagscores[tag]) / float(len(trail))
 
 		# Find the merged tagset of the packages in trail
@@ -99,11 +101,14 @@ if __name__ == '__main__':
 		for num, pkg in enumerate(display):
 			aptpkg = apt_cache[pkg]
 			desc = aptpkg.raw_description.split("\n")[0]
-			print "%2d) %s - %s" % (num + 1, pkg, desc)
+			print("%2d) %s - %s" % (num + 1, pkg, desc))
 
 		# Ask the user to choose a new package
 		while True:
-			ans = raw_input("> ").strip()
+			if sys.version >= '3':
+				ans = input("> ").strip()
+			else:
+				ans = raw_input("> ").strip()
 			if ans[0] == 'q':
 				done = True
 				break
@@ -115,7 +120,7 @@ if __name__ == '__main__':
 					trail = [display[num]] + trail[:maxlen]
 					break
 				else:
-					print "The number is too high"
+					print("The number is too high")
 
 
 # vim:set ts=4 sw=4:

@@ -1,3 +1,10 @@
+python-debian (0.1.21+nmu1) unstable; urgency=low
+
+  * Non-maintainer upload.
+  * Port to Python 3. (Closes: #625509)
+
+ -- Colin Watson <cjwatson@debian.org>  Wed, 22 Aug 2012 16:27:05 +0100
+
 python-debian (0.1.21) unstable; urgency=low
 
   [ Tshepang Lekhonkhobe ]

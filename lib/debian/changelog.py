@@ -23,15 +23,27 @@
 
 """This module implements facilities to deal with Debian changelogs."""
 
+from __future__ import absolute_import
+
 import os
 import pwd
 import re
 import socket
 import warnings
+import sys
 
-import debian_support
+import six
 
-class ChangelogParseError(StandardError):
+from debian import debian_support
+
+# Python 3 doesn't have StandardError, but let's avoid changing our
+# exception inheritance hierarchy for Python 2.
+try:
+    _base_exception_class = StandardError
+except NameError:
+    _base_exception_class = Exception
+
+class ChangelogParseError(_base_exception_class):
     """Indicates that the changelog could not be parsed"""
     is_user_error = True
 
@@ -41,11 +53,11 @@ class ChangelogParseError(StandardError):
     def __str__(self):
         return "Could not parse changelog: "+self._line
 
-class ChangelogCreateError(StandardError):
+class ChangelogCreateError(_base_exception_class):
     """Indicates that changelog could not be created, as all the information
     required was not given"""
 
-class VersionError(StandardError):
+class VersionError(_base_exception_class):
     """Indicates that the version does not conform to the required format"""
 
     is_user_error = True
@@ -128,7 +140,7 @@ class ChangeBlock(object):
                 changes.append(change)
             self._changes = changes
 
-    def __unicode__(self):
+    def _format(self):
         # TODO(jsw): Switch to StringIO or a list to join at the end.
         block = ""
         if self.package is None:
@@ -161,8 +173,16 @@ class ChangeBlock(object):
             block += line + "\n"
         return block
 
-    def __str__(self):
-        return unicode(self).encode(self._encoding)
+    if sys.version >= '3':
+        __str__ = _format
+
+        def __bytes__(self):
+            return str(self).encode(self._encoding)
+    else:
+        __unicode__ = _format
+
+        def __str__(self):
+            return unicode(self).encode(self._encoding)
 
 topline = re.compile(r'^(\w%(name_chars)s*) \(([^\(\) \t]+)\)'
                      '((\s+%(name_chars)s+)+)\;'
@@ -259,7 +279,9 @@ class Changelog(object):
         
         state = first_heading
         old_state = None
-        if isinstance(file, basestring):
+        if isinstance(file, bytes):
+            file = file.decode(encoding)
+        if isinstance(file, six.string_types):
             # Make sure the changelog file is not empty.
             if len(file.strip()) == 0:
                 self._parse_error('Empty changelog file.', strict)
@@ -267,7 +289,7 @@ class Changelog(object):
 
             file = file.splitlines()
         for line in file:
-            if not isinstance(line, unicode):
+            if not isinstance(line, six.text_type):
                 line = line.decode(encoding)
             # Support both lists of lines without the trailing newline and
             # those with trailing newlines (e.g. when given a file object
@@ -459,15 +481,23 @@ class Changelog(object):
     def _raw_versions(self):
         return [block._raw_version for block in self._blocks]
 
-    def __unicode__(self):
+    def _format(self):
         pieces = []
-        pieces.append(u'\n'.join(self.initial_blank_lines))
+        pieces.append(six.u('\n').join(self.initial_blank_lines))
         for block in self._blocks:
-            pieces.append(unicode(block))
-        return u''.join(pieces)
+            pieces.append(six.text_type(block))
+        return six.u('').join(pieces)
 
-    def __str__(self):
-        return unicode(self).encode(self._encoding)
+    if sys.version >= '3':
+        __str__ = _format
+
+        def __bytes__(self):
+            return str(self).encode(self._encoding)
+    else:
+        __unicode__ = _format
+
+        def __str__(self):
+            return unicode(self).encode(self._encoding)
 
     def __iter__(self):
         return iter(self._blocks)

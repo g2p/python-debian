@@ -17,6 +17,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import absolute_import
+
 import unittest
 import os
 import re
@@ -25,18 +27,20 @@ import sys
 import tempfile
 import uu
 
-sys.path.insert(0, '../lib/debian/')
+import six
 
-import arfile
-import debfile
+sys.path.insert(0, '../lib/')
+
+from debian import arfile
+from debian import debfile
 
 class TestArFile(unittest.TestCase):
 
     def setUp(self):
         os.system("ar r test.ar test_debfile.py test_changelog test_deb822.py >/dev/null 2>&1") 
         assert os.path.exists("test.ar")
-        self.testmembers = [ x.strip()
-                for x in os.popen("ar t test.ar").readlines() ]
+        with os.popen("ar t test.ar") as ar:
+            self.testmembers = [x.strip() for x in ar.readlines()]
         self.a = arfile.ArFile("test.ar")
 
     def tearDown(self):
@@ -69,17 +73,18 @@ class TestArFile(unittest.TestCase):
             self.assertEqual(m.tell(), i, "failed tell()")
             
             m.seek(-i, 1)
-            self.assertEqual(m.tell(), 0L, "failed tell()")
+            self.assertEqual(m.tell(), 0, "failed tell()")
 
         m.seek(0)
         self.assertRaises(IOError, m.seek, -1, 0)
         self.assertRaises(IOError, m.seek, -1, 1)
         m.seek(0)
+        m.close()
     
     def test_file_read(self):
         """ test for faked read """
         for m in self.a.getmembers():
-            f = open(m.name)
+            f = open(m.name, 'rb')
         
             for i in [10, 100, 10000]:
                 self.assertEqual(m.read(i), f.read(i))
@@ -91,7 +96,7 @@ class TestArFile(unittest.TestCase):
         """ test for faked readlines """
 
         for m in self.a.getmembers():
-            f = open(m.name)
+            f = open(m.name, 'rb')
         
             self.assertEqual(m.readlines(), f.readlines())
             
@@ -102,8 +107,8 @@ class TestDebFile(unittest.TestCase):
 
     def setUp(self):
         def uudecode(infile, outfile):
-            uu_deb = open(infile, 'r')
-            bin_deb = open(outfile, 'w')
+            uu_deb = open(infile, 'rb')
+            bin_deb = open(outfile, 'wb')
             uu.decode(uu_deb, bin_deb)
             uu_deb.close()
             bin_deb.close()
@@ -116,14 +121,15 @@ class TestDebFile(unittest.TestCase):
         uudecode('test-bz2.deb.uu', self.bz2_debname)
 
         self.debname = 'test.deb'
-        uu_deb = open('test.deb.uu', 'r')
-        bin_deb = open(self.debname, 'w')
+        uu_deb = open('test.deb.uu', 'rb')
+        bin_deb = open(self.debname, 'wb')
         uu.decode(uu_deb, bin_deb)
         uu_deb.close()
         bin_deb.close()
         self.d = debfile.DebFile(self.debname)
 
     def tearDown(self):
+        self.d.close()
         os.unlink(self.debname)
         os.unlink(self.broken_debname)
         os.unlink(self.bz2_debname)
@@ -138,32 +144,41 @@ class TestDebFile(unittest.TestCase):
         # can access its content
         self.assertEqual(os.path.normpath(bz2_deb.data.tgz().getnames()[10]),
                          os.path.normpath('./usr/share/locale/bg/'))
+        bz2_deb.close()
 
     def test_data_names(self):
         """ test for file list equality """ 
         tgz = self.d.data.tgz()
-        dpkg_names = map(os.path.normpath,
-                [ x.strip() for x in
-                    os.popen("dpkg-deb --fsys-tarfile %s | tar t" %
-                        self.debname).readlines() ])
-        debfile_names = map(os.path.normpath, tgz.getnames())
+        with os.popen("dpkg-deb --fsys-tarfile %s | tar t" %
+                      self.debname) as tar:
+            dpkg_names = [os.path.normpath(x.strip()) for x in tar.readlines()]
+        debfile_names = [os.path.normpath(name) for name in tgz.getnames()]
         
         # skip the root
         self.assertEqual(debfile_names[1:], dpkg_names[1:])
 
     def test_control(self):
         """ test for control equality """
-        filecontrol = "".join(os.popen("dpkg-deb -f %s" %
-            self.debname).readlines())
+        with os.popen("dpkg-deb -f %s" % self.debname) as dpkg_deb:
+            filecontrol = "".join(dpkg_deb.readlines())
 
-        self.assertEqual(self.d.control.get_content("control"), filecontrol)
+        self.assertEqual(
+            self.d.control.get_content("control").decode("utf-8"), filecontrol)
+        self.assertEqual(
+            self.d.control.get_content("control", encoding="utf-8"),
+            filecontrol)
 
     def test_md5sums(self):
         """test md5 extraction from .debs"""
         md5 = self.d.md5sums()
-        self.assertEqual(md5['usr/bin/hello'],
+        self.assertEqual(md5[b'usr/bin/hello'],
                 '9c1a72a78f82216a0305b6c90ab71058')
-        self.assertEqual(md5['usr/share/locale/zh_TW/LC_MESSAGES/hello.mo'],
+        self.assertEqual(md5[b'usr/share/locale/zh_TW/LC_MESSAGES/hello.mo'],
+                'a7356e05bd420872d03cd3f5369de42f')
+        md5 = self.d.md5sums(encoding='UTF-8')
+        self.assertEqual(md5[six.u('usr/bin/hello')],
+                '9c1a72a78f82216a0305b6c90ab71058')
+        self.assertEqual(md5[six.u('usr/share/locale/zh_TW/LC_MESSAGES/hello.mo')],
                 'a7356e05bd420872d03cd3f5369de42f')
 
 if __name__ == '__main__':

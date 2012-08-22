@@ -16,6 +16,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import print_function
+
 import os
 import sys
 
@@ -23,18 +25,18 @@ from debian import arfile
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print "usage: arfile.py [tp] <arfile>"
+        print("usage: arfile.py [tp] <arfile>")
         sys.exit(1)
     
     if not os.path.exists(sys.argv[2]):
-        print "please provide a file to operate on"
+        print("please provide a file to operate on")
         sys.exit(1)
         
     a = arfile.ArFile(sys.argv[2])
 
     if sys.argv[1] == 't':
-        print "\n".join(a.getnames())
+        print("\n".join(a.getnames()))
     elif sys.argv[1] == 'p':
         for m in a.getmembers():
-            #print "".join(m.readlines())
+            #print("".join(m.readlines()))
             sys.stdout.write("".join(m.readlines()))

@@ -11,15 +11,16 @@
 """Like "head" for changelog entries, return last n-th entries of the changelog
 shipped in a .deb file."""
 
-import string
+from __future__ import print_function
+
 import sys
 
 from debian import debfile
 
 if __name__ == '__main__':
     if len(sys.argv) > 3 or len(sys.argv) < 2:
-        print "Usage: changelog_head DEB [ENTRIES]"
-        print "  ENTRIES defaults to 10"
+        print("Usage: changelog_head DEB [ENTRIES]")
+        print("  ENTRIES defaults to 10")
         sys.exit(1)
 
     entries = 10
@@ -31,5 +32,5 @@ if __name__ == '__main__':
     deb = debfile.DebFile(sys.argv[1])
     chg = deb.changelog()
     entries = chg._blocks[:entries]
-    print string.join(map(str, entries), '')
+    print(''.join(map(str, entries)))
 

@@ -1,8 +1,14 @@
 #!/usr/bin/python
 
-import debtags
+from __future__ import absolute_import, print_function
+
 import sys
+import os
 import inspect
+
+sys.path.insert(0, os.path.join(sys.path[0], os.pardir))
+
+from debian import debtags
 
 def print_indented (spaces, string):
 	for line in string.split("\n"):
@@ -15,10 +21,10 @@ def document (callable):
 	if callable.__doc__ != None:
 		print_indented(2, callable.__name__)
 		print_indented(4, inspect.getdoc(callable))
-		print
+		print()
 
 
-print """debtags.py README
+print("""debtags.py README
 =================
 
 The Debtags python module provides support for accessing and manipulating
@@ -41,24 +47,24 @@ Classes
 =======
 
 There is only one class: debtags.DB:
-"""
+""")
 
 document (debtags.DB)
 
-print """
+print("""
 The methods of debtags.DB are:
-"""
+""")
 
 for m in dir(debtags.DB):
 	if m[0:2] != '__' and callable(getattr(debtags.DB, m)):
 		document(getattr(debtags.DB, m))
 
-print """Iteration
+print("""Iteration
 =========
 
 debtags.DB provides various iteration methods to iterate the collection either
 in a package-centered or in a tag-centered way:
-"""
+""")
 
 document(debtags.DB.iter_packages)
 document(debtags.DB.iter_packages_tags)
@@ -66,7 +72,7 @@ document(debtags.DB.iter_tags)
 document(debtags.DB.iter_tags_packages)
 
 
-print """Sample usage
+print("""Sample usage
 ============
 
 This example reads the system debtags database and performs a simple tag
@@ -76,10 +82,10 @@ search::
     
     db = debtags.DB()
     db.read(open("/var/lib/debtags/package-tags", "r"))
-    print db.package_count(), "packages in the database"
-    print "Image editors:"
+    print(db.package_count(), "packages in the database")
+    print("Image editors:")
     for pkg in db.packages_of_tags(set(("use::editing", "works-with::image:raster"))):
-    	print " *", pkg
+    	print(" *", pkg)
 
 This example computes the set of tags that belong to all the packages in a
 list, then shows all the other packages that have those tags:
@@ -89,10 +95,10 @@ list, then shows all the other packages that have those tags:
     db = debtags.DB()
     db.read(open("/var/lib/debtags/package-tags", "r"))
     tags = db.tags_of_packages(("gimp", "krita"))
-    print "Common tags:"
+    print("Common tags:")
     for tag in tags:
-	print " *", tag
-    print "Packages similar to gimp and krita:"
+	print(" *", tag)
+    print("Packages similar to gimp and krita:")
     for pkg in db.packages_of_tags(tags):
-	print " *", pkg
-"""
+	print(" *", pkg)
+""")

@@ -8,7 +8,7 @@ Uploaders: Adeodato Simó <dato@net.com.org.es>,
  Reinhard Tartler <siretart@tauware.de>,
  Stefano Zacchiroli <zack@debian.org>,
  John Wright <jsw@debian.org>
-Build-Depends: debhelper (>= 5.0.37.2), python (>= 2.6.6-3~), python-setuptools, python-chardet
+Build-Depends: debhelper (>= 5.0.37.2), python (>= 2.6.6-3~), python3 (>= 3.1.2-8~), python-setuptools, python3-setuptools, python-chardet, python3-chardet, python-six, python3-six
 Standards-Version: 3.8.4
 Vcs-Browser: http://git.debian.org/?p=pkg-python-debian/python-debian.git
 Vcs-Git: git://git.debian.org/git/pkg-python-debian/python-debian.git
@@ -16,7 +16,7 @@ X-Python-Version: >= 2.5
 
 Package: python-debian
 Architecture: all
-Depends: ${python:Depends}, ${misc:Depends}, python-chardet
+Depends: ${python:Depends}, ${misc:Depends}, python-chardet, python-six
 Recommends: python-apt
 Suggests: gpgv
 Provides: python-deb822
@@ -24,6 +24,23 @@ Conflicts: python-deb822
 Replaces: python-deb822
 Description: Python modules to work with Debian-related data formats
  This package provides Python modules that abstract many formats of Debian
+ related files. Currently handled are:
+  * Debtags information (debian.debtags module)
+  * debian/changelog (debian.changelog module)
+  * Packages files, pdiffs (debian.debian_support module)
+  * Control files of single or multiple RFC822-style paragraphs, e.g.
+    debian/control, .changes, .dsc, Packages, Sources, Release, etc.
+    (debian.deb822 module)
+  * Raw .deb and .ar files, with (read-only) access to contained
+    files and meta-information
+
+Package: python3-debian
+Architecture: all
+Depends: ${python3:Depends}, ${misc:Depends}, python3-chardet, python3-six
+Recommends: python3-apt
+Suggests: gpgv
+Description: Python 3 modules to work with Debian-related data formats
+ This package provides Python 3 modules that abstract many formats of Debian
  related files. Currently handled are:
   * Debtags information (debian.debtags module)
   * debian/changelog (debian.changelog module)

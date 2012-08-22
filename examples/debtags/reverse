@@ -18,6 +18,8 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
+from __future__ import print_function
+
 import sys
 from debian import debtags
 
@@ -33,4 +35,4 @@ db = debtags.read_tag_database_reversed(input)
 for pkg, tags in db.items():
 	# Using % here seems awkward to me, but if I use calls to
 	# sys.stdout.write it becomes a bit slower
-	print "%s:" % (pkg), ", ".join(tags)
+	print("%s:" % (pkg), ", ".join(tags))

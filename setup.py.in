@@ -27,4 +27,5 @@ setup(name='python-debian',
       py_modules=['deb822'],
       maintainer='Debian python-debian Maintainers',
       maintainer_email='pkg-python-debian-maint@lists.alioth.debian.org',
+      install_requires=['six'],
      )

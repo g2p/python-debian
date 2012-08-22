@@ -9,6 +9,8 @@
 
 # Given a file, search Debian packages that can somehow handle it
 
+from __future__ import print_function
+
 import sys
 
 # Requires python-extractor, python-magic and python-debtags
@@ -89,13 +91,13 @@ def mimetype(fname):
     keys = extractor.extract(fname)
     xkeys = {}
     for k, v in keys:
-        if xkeys.has_key(k):
+        if k in xkeys:
             xkeys[k].append(v)
         else:
             xkeys[k] = [v]
     namemagic =  magic.file(fname)
-    contentmagic = magic.buffer(file(fname, "r").read(4096))
-    return xkeys.has_key("mimetype") and xkeys['mimetype'][0] or contentmagic or namemagic
+    contentmagic = magic.buffer(open(fname, "r").read(4096))
+    return "mimetype" in xkeys and xkeys['mimetype'][0] or contentmagic or namemagic
 
 
 class Parser(OptionParser):
@@ -125,7 +127,7 @@ if __name__ == '__main__':
     fullcoll.read(open(options.tagdb, "r"), lambda x: not tag_filter.match(x))
 
     type = mimetype(args[0])
-    #print >>sys.stderr, "Mime type:", type
+    #print("Mime type:", type, file=sys.stderr)
     found = set()
     for match, tags in mime_map:
         match = re.compile(match)
@@ -133,26 +135,26 @@ if __name__ == '__main__':
             for t in tags:
                 found.add(t)
     if len(found) == 0:
-        print >>sys.stderr, "Unhandled mime type:", type
+        print("Unhandled mime type:", type, file=sys.stderr)
     else:
         if options.action != None:
             apt_cache = apt.Cache()
             query = found.copy()
             query.add("role::program")
             query.add("use::"+options.action)
-            print "Debtags query:", " && ".join(query)
+            print("Debtags query:", " && ".join(query))
             subcoll = fullcoll.filter_packages_tags(lambda pt: query.issubset(pt[1]))
             for i in subcoll.iter_packages():
                 aptpkg = apt_cache[i]
                 desc = aptpkg.raw_description.split("\n")[0]
-                print i, "-", desc
+                print(i, "-", desc)
         else:
-            print "Debtags query:", " && ".join(found)
+            print("Debtags query:", " && ".join(found))
 
             query = found.copy()
             query.add("role::program")
             subcoll = fullcoll.filter_packages_tags(lambda pt: query.issubset(pt[1]))
             uses = map(lambda x:x[5:], filter(lambda x:x.startswith("use::"), subcoll.iter_tags()))
-            print "Available actions:", ", ".join(uses)
+            print("Available actions:", ", ".join(uses))
 
 # vim:set ts=4 sw=4:

@@ -16,6 +16,8 @@ were not versioned. The graph is retourned in output as a (non normalized)
 graphviz graph suitable to be processed by dot (for an unstable/main Packages
 file, generating the final graph will take a while ...)."""
 
+from __future__ import print_function
+
 import sys
 from debian import deb822
 
@@ -23,7 +25,7 @@ __fresh_id = 0
 
 def main():
     if len(sys.argv) != 2:
-        print "Usage: depgraph PACKAGES_FILE"
+        print("Usage: depgraph PACKAGES_FILE")
         sys.exit(2)
 
     def get_id():
@@ -32,12 +34,12 @@ def main():
         return ("NODE_%d" % __fresh_id)
 
     def emit_arc(node1, node2):
-        print '  "%s" -> "%s" ;' % (node1, node2)
+        print('  "%s" -> "%s" ;' % (node1, node2))
     def emit_node(node, dsc):
-        print '  "%s" [label="%s"] ;' % (node, dsc)
+        print('  "%s" [label="%s"] ;' % (node, dsc))
 
-    print "digraph depgraph {"
-    for pkg in deb822.Packages.iter_paragraphs(file(sys.argv[1])):
+    print("digraph depgraph {")
+    for pkg in deb822.Packages.iter_paragraphs(open(sys.argv[1])):
         name = pkg['package']
         rels = pkg.relations
         for deps in rels['depends']:
@@ -52,7 +54,7 @@ def main():
                     # even though it is forbidden by policy, there are some
                     # dependencies with upper case letter in the archive,
                     # apparently apt-get turn them to lowercase ...
-    print "}"
+    print("}")
 
 if __name__ == '__main__':
     main()

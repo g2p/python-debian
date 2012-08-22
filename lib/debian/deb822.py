@@ -22,7 +22,9 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-from deprecation import function_deprecated_by
+from __future__ import absolute_import, print_function
+
+from debian.deprecation import function_deprecated_by
 
 try:
     import apt_pkg
@@ -35,20 +37,46 @@ except (ImportError, AttributeError):
 import chardet
 import os
 import re
-import string
 import subprocess
 import sys
 import warnings
 
-import StringIO
-import UserDict
+try:
+    from StringIO import StringIO
+    BytesIO = StringIO
+except ImportError:
+    from io import BytesIO, StringIO
+try:
+    from collections import Mapping, MutableMapping
+    _mapping_mixin = Mapping
+    _mutable_mapping_mixin = MutableMapping
+except ImportError:
+    from UserDict import DictMixin
+    _mapping_mixin = DictMixin
+    _mutable_mapping_mixin = DictMixin
+
+import six
+
+if sys.version >= '3':
+    import io
+    def _is_real_file(f):
+        if not isinstance(f, io.IOBase):
+            return False
+        try:
+            f.fileno()
+            return True
+        except (AttributeError, io.UnsupportedOperation):
+            return False
+else:
+    def _is_real_file(f):
+        return isinstance(f, file) and hasattr(f, 'fileno')
 
 
 GPGV_DEFAULT_KEYRINGS = frozenset(['/usr/share/keyrings/debian-keyring.gpg'])
 GPGV_EXECUTABLE = '/usr/bin/gpgv'
 
 
-class TagSectionWrapper(object, UserDict.DictMixin):
+class TagSectionWrapper(_mapping_mixin, object):
     """Wrap a TagSection object, using its find_raw method to get field values
 
     This allows us to pick which whitespace to strip off the beginning and end
@@ -58,9 +86,14 @@ class TagSectionWrapper(object, UserDict.DictMixin):
     def __init__(self, section):
         self.__section = section
 
-    def keys(self):
-        return [key for key in self.__section.keys()
-                if not key.startswith('#')]
+    def __iter__(self):
+        for key in self.__section.keys():
+            if not key.startswith('#'):
+                yield key
+
+    def __len__(self):
+        return len([key for key in self.__section.keys()
+                    if not key.startswith('#')])
 
     def __getitem__(self, key):
         s = self.__section.find_raw(key)
@@ -70,11 +103,11 @@ class TagSectionWrapper(object, UserDict.DictMixin):
 
         # Get just the stuff after the first ':'
         # Could use s.partition if we only supported python >= 2.5
-        data = s[s.find(':')+1:]
+        data = s[s.find(b':')+1:]
 
         # Get rid of spaces and tabs after the ':', but not newlines, and strip
         # off any newline at the end of the data.
-        return data.lstrip(' \t').rstrip('\n')
+        return data.lstrip(b' \t').rstrip(b'\n')
 
 
 class OrderedSet(object):
@@ -107,6 +140,9 @@ class OrderedSet(object):
         # Return an iterator of items in the order they were added
         return iter(self.__order)
 
+    def __len__(self):
+        return len(self.__order)
+
     def __contains__(self, item):
         # This is what makes OrderedSet faster than using a list to keep track
         # of keys.  Lookup in a set is O(1) instead of O(n) for a list.
@@ -121,10 +157,10 @@ class OrderedSet(object):
     ###
 
 
-class Deb822Dict(object, UserDict.DictMixin):
-    # Subclassing UserDict.DictMixin because we're overriding so much dict
-    # functionality that subclassing dict requires overriding many more than
-    # the four methods that DictMixin requires.
+class Deb822Dict(_mutable_mapping_mixin, object):
+    # Subclassing _mutable_mapping_mixin because we're overriding so much
+    # dict functionality that subclassing dict requires overriding many more
+    # than the methods that _mutable_mapping_mixin requires.
     """A dictionary-like object suitable for storing RFC822-like data.
 
     Deb822Dict behaves like a normal dict, except:
@@ -167,11 +203,42 @@ class Deb822Dict(object, UserDict.DictMixin):
         if _parsed is not None:
             self.__parsed = _parsed
             if _fields is None:
-                self.__keys.extend([ _strI(k) for k in self.__parsed.keys() ])
+                self.__keys.extend([ _strI(k) for k in self.__parsed ])
             else:
-                self.__keys.extend([ _strI(f) for f in _fields if self.__parsed.has_key(f) ])
-        
-    ### BEGIN DictMixin methods
+                self.__keys.extend([ _strI(f) for f in _fields if f in self.__parsed ])
+
+    def _detect_encoding(self, value):
+        """If value is not already Unicode, decode it intelligently."""
+        if isinstance(value, bytes):
+            try:
+                return value.decode(self.encoding)
+            except UnicodeDecodeError as e:
+                # Evidently, the value wasn't encoded with the encoding the
+                # user specified.  Try detecting it.
+                warnings.warn('decoding from %s failed; attempting to detect '
+                              'the true encoding' % self.encoding,
+                              UnicodeWarning)
+                result = chardet.detect(value)
+                try:
+                    return value.decode(result['encoding'])
+                except UnicodeDecodeError:
+                    raise e
+                else:
+                    # Assume the rest of the paragraph is in this encoding as
+                    # well (there's no sense in repeating this exercise for
+                    # every field).
+                    self.encoding = result['encoding']
+        else:
+            return value
+
+    ### BEGIN _mutable_mapping_mixin methods
+
+    def __iter__(self):
+        for key in self.__keys:
+            yield str(key)
+
+    def __len__(self):
+        return len(self.__keys)
 
     def __setitem__(self, key, value):
         key = _strI(key)
@@ -188,28 +255,7 @@ class Deb822Dict(object, UserDict.DictMixin):
             else:
                 raise
 
-        if isinstance(value, str):
-            # Always return unicode objects instead of strings
-            try:
-                value = value.decode(self.encoding)
-            except UnicodeDecodeError, e:
-                # Evidently, the value wasn't encoded with the encoding the
-                # user specified.  Try detecting it.
-                warnings.warn('decoding from %s failed; attempting to detect '
-                              'the true encoding' % self.encoding,
-                              UnicodeWarning)
-                result = chardet.detect(value)
-                try:
-                    value = value.decode(result['encoding'])
-                except UnicodeDecodeError:
-                    raise e
-                else:
-                    # Assume the rest of the paragraph is in this encoding as
-                    # well (there's no sense in repeating this exercise for
-                    # every field).
-                    self.encoding = result['encoding']
-
-        return value
+        return self._detect_encoding(value)
 
     def __delitem__(self, key):
         key = _strI(key)
@@ -221,21 +267,18 @@ class Deb822Dict(object, UserDict.DictMixin):
             # only been in the self.__parsed dict.
             pass
 
-    def has_key(self, key):
+    def __contains__(self, key):
         key = _strI(key)
         return key in self.__keys
     
-    def keys(self):
-        return [str(key) for key in self.__keys]
-    
-    ### END DictMixin methods
+    ### END _mutable_mapping_mixin methods
 
     def __repr__(self):
         return '{%s}' % ', '.join(['%r: %r' % (k, v) for k, v in self.items()])
 
     def __eq__(self, other):
-        mykeys = self.keys(); mykeys.sort()
-        otherkeys = other.keys(); otherkeys.sort()
+        mykeys = sorted(self)
+        otherkeys = sorted(other)
         if not mykeys == otherkeys:
             return False
 
@@ -245,6 +288,10 @@ class Deb822Dict(object, UserDict.DictMixin):
 
         # If we got here, everything matched
         return True
+
+    # Overriding __eq__ blocks inheritance of __hash__ in Python 3, and
+    # instances of this class are not sensibly hashable anyway.
+    __hash__ = None
 
     def copy(self):
         # Use self.__class__ so this works as expected for subclasses
@@ -261,7 +308,7 @@ class Deb822(Deb822Dict):
         """Create a new Deb822 instance.
 
         :param sequence: a string, or any any object that returns a line of
-            input each time, normally a file().  Alternately, sequence can
+            input each time, normally a file.  Alternately, sequence can
             be a dict that contains the initial key-value pairs.
 
         :param fields: if given, it is interpreted as a list of fields that
@@ -298,7 +345,7 @@ class Deb822(Deb822Dict):
 
         :param fields: likewise.
 
-        :param use_apt_pkg: if sequence is a file(), apt_pkg will be used 
+        :param use_apt_pkg: if sequence is a file, apt_pkg will be used
             if available to parse the file, since it's much much faster.  Set
             this parameter to False to disable using apt_pkg.
         :param shared_storage: not used, here for historical reasons.  Deb822
@@ -308,8 +355,16 @@ class Deb822(Deb822Dict):
             necessary in order to properly interpret the strings.)
         """
 
-        if _have_apt_pkg and use_apt_pkg and isinstance(sequence, file):
-            parser = apt_pkg.TagFile(sequence)
+        if _have_apt_pkg and use_apt_pkg and _is_real_file(sequence):
+            kwargs = {}
+            if sys.version >= '3':
+                # bytes=True is supported for both Python 2 and 3, but we
+                # only actually need it for Python 3, so this saves us from
+                # having to require a newer version of python-apt for Python
+                # 2 as well.  This allows us to apply our own encoding
+                # handling, which is more tolerant of mixed-encoding files.
+                kwargs['bytes'] = True
+            parser = apt_pkg.TagFile(sequence, **kwargs)
             for section in parser:
                 paragraph = cls(fields=fields,
                                 _parsed=TagSectionWrapper(section),
@@ -336,11 +391,24 @@ class Deb822(Deb822Dict):
         """
         at_beginning = True
         for line in sequence:
-            if line.startswith('#'):
-                continue
-            if at_beginning:
-                if not line.rstrip('\r\n'):
+            # The bytes/str polymorphism required here to support Python 3
+            # is unpleasant, but fortunately limited.  We need this because
+            # at this point we might have been given either bytes or
+            # Unicode, and we haven't yet got to the point where we can try
+            # to decode a whole paragraph and detect its encoding.
+            if isinstance(line, bytes):
+                if line.startswith(b'#'):
                     continue
+            else:
+                if line.startswith('#'):
+                    continue
+            if at_beginning:
+                if isinstance(line, bytes):
+                    if not line.rstrip(b'\r\n'):
+                        continue
+                else:
+                    if not line.rstrip('\r\n'):
+                        continue
                 at_beginning = False
             yield line
 
@@ -353,7 +421,7 @@ class Deb822(Deb822Dict):
 
         wanted_field = lambda f: fields is None or f in fields
 
-        if isinstance(sequence, basestring):
+        if isinstance(sequence, (six.string_types, bytes)):
             sequence = sequence.splitlines()
 
         curkey = None
@@ -361,6 +429,8 @@ class Deb822(Deb822Dict):
 
         for line in self.gpg_stripped_paragraph(
                 self._skip_useless_lines(sequence)):
+            line = self._detect_encoding(line)
+
             m = single.match(line)
             if m:
                 if curkey:
@@ -401,6 +471,10 @@ class Deb822(Deb822Dict):
     def __unicode__(self):
         return self.dump()
 
+    if sys.version >= '3':
+        def __bytes__(self):
+            return self.dump().encode(self.encoding)
+
     # __repr__ is handled by Deb822Dict
 
     def get_as_string(self, key):
@@ -410,7 +484,7 @@ class Deb822(Deb822Dict):
         this can be overridden in subclasses (e.g. _multivalued) that can take
         special values.
         """
-        return unicode(self[key])
+        return six.text_type(self[key])
 
     def dump(self, fd=None, encoding=None):
         """Dump the the contents in the original format
@@ -424,7 +498,7 @@ class Deb822(Deb822Dict):
         """
 
         if fd is None:
-            fd = StringIO.StringIO()
+            fd = StringIO()
             return_string = True
         else:
             return_string = False
@@ -434,7 +508,7 @@ class Deb822(Deb822Dict):
             # was explicitly specified
             encoding = self.encoding
 
-        for key in self.iterkeys():
+        for key in self:
             value = self.get_as_string(key)
             if not value or value[0] == '\n':
                 # Avoid trailing whitespace after "Field:" if it's on its own
@@ -481,8 +555,7 @@ class Deb822(Deb822Dict):
             if (s1 + s2).count(', '):
                 delim = ', '
 
-            L = (s1 + delim + s2).split(delim)
-            L.sort()
+            L = sorted((s1 + delim + s2).split(delim))
 
             prev = merged = L[0]
 
@@ -547,13 +620,20 @@ class Deb822(Deb822Dict):
         gpg_pre_lines = []
         lines = []
         gpg_post_lines = []
-        state = 'SAFE'
-        gpgre = re.compile(r'^-----(?P<action>BEGIN|END) PGP (?P<what>[^-]+)-----$')
-        blank_line = re.compile('^$')
+        state = b'SAFE'
+        gpgre = re.compile(br'^-----(?P<action>BEGIN|END) PGP (?P<what>[^-]+)-----$')
+        blank_line = re.compile(b'^$')
         first_line = True
 
         for line in sequence:
-            line = line.strip('\r\n')
+            # Some consumers of this method require bytes (encoding
+            # detection and signature checking).  However, we might have
+            # been given a file opened in text mode, in which case it's
+            # simplest to encode to bytes.
+            if sys.version >= '3' and isinstance(line, str):
+                line = line.encode()
+
+            line = line.strip(b'\r\n')
 
             # skip initial blank lines, if any
             if first_line:
@@ -565,7 +645,7 @@ class Deb822(Deb822Dict):
             m = gpgre.match(line)
 
             if not m:
-                if state == 'SAFE':
+                if state == b'SAFE':
                     if not blank_line.match(line):
                         lines.append(line)
                     else:
@@ -573,17 +653,17 @@ class Deb822(Deb822Dict):
                             # There's no gpg signature, so we should stop at
                             # this blank line
                             break
-                elif state == 'SIGNED MESSAGE':
+                elif state == b'SIGNED MESSAGE':
                     if blank_line.match(line):
-                        state = 'SAFE'
+                        state = b'SAFE'
                     else:
                         gpg_pre_lines.append(line)
-                elif state == 'SIGNATURE':
+                elif state == b'SIGNATURE':
                     gpg_post_lines.append(line)
             else:
-                if m.group('action') == 'BEGIN':
+                if m.group('action') == b'BEGIN':
                     state = m.group('what')
-                elif m.group('action') == 'END':
+                elif m.group('action') == b'END':
                     gpg_post_lines.append(line)
                     break
                 if not blank_line.match(line):
@@ -617,7 +697,7 @@ class Deb822(Deb822Dict):
         # _gpg_multivalued.__init__) which is small compared to Packages or
         # Sources which contain no signature
         if not hasattr(self, 'raw_text'):
-            raise ValueError, "original text cannot be found"
+            raise ValueError("original text cannot be found")
 
         if self.gpg_info is None:
             self.gpg_info = GpgInfo.from_sequence(self.raw_text,
@@ -665,7 +745,7 @@ class GpgInfo(dict):
 
     def valid(self):
         """Is the signature valid?"""
-        return self.has_key('GOODSIG') or self.has_key('VALIDSIG')
+        return 'GOODSIG' in self or 'VALIDSIG' in self
     
 # XXX implement as a property?
 # XXX handle utf-8 %-encoding
@@ -682,9 +762,9 @@ class GpgInfo(dict):
 
         n = cls()
 
-        if isinstance(out, basestring):
+        if isinstance(out, six.string_types):
             out = out.split('\n')
-        if isinstance(err, basestring):
+        if isinstance(err, six.string_types):
             err = err.split('\n')
 
         n.out = out
@@ -714,7 +794,7 @@ class GpgInfo(dict):
     def from_sequence(cls, sequence, keyrings=None, executable=None):
         """Create a new GpgInfo object from the given sequence.
 
-        :param sequence: sequence of lines or a string
+        :param sequence: sequence of lines of bytes or a single byte string
 
         :param keyrings: list of keyrings to use (default:
             ['/usr/share/keyrings/debian-keyring.gpg'])
@@ -734,35 +814,38 @@ class GpgInfo(dict):
             args.extend(["--keyring", k])
         
         if "--keyring" not in args:
-            raise IOError, "cannot access any of the given keyrings"
+            raise IOError("cannot access any of the given keyrings")
 
         p = subprocess.Popen(args, stdin=subprocess.PIPE,
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             universal_newlines=False)
         # XXX what to do with exit code?
 
-        if isinstance(sequence, basestring):
-            (out, err) = p.communicate(sequence)
+        if isinstance(sequence, bytes):
+            inp = sequence
         else:
-            (out, err) = p.communicate(cls._get_full_string(sequence))
+            inp = cls._get_full_bytes(sequence)
+        out, err = p.communicate(inp)
 
-        return cls.from_output(out, err)
+        return cls.from_output(out.decode('utf-8'),
+                               err.decode('utf-8'))
 
     @staticmethod
-    def _get_full_string(sequence):
-        """Return a string from a sequence of lines.
+    def _get_full_bytes(sequence):
+        """Return a byte string from a sequence of lines of bytes.
 
         This method detects if the sequence's lines are newline-terminated, and
-        constructs the string appropriately.
+        constructs the byte string appropriately.
         """
         # Peek at the first line to see if it's newline-terminated.
         sequence_iter = iter(sequence)
         try:
-            first_line = sequence_iter.next()
+            first_line = next(sequence_iter)
         except StopIteration:
-            return ""
-        join_str = '\n'
-        if first_line.endswith('\n'):
-            join_str = ''
+            return b""
+        join_str = b'\n'
+        if first_line.endswith(b'\n'):
+            join_str = b''
         return first_line + join_str + join_str.join(sequence_iter)
 
     @classmethod
@@ -771,7 +854,8 @@ class GpgInfo(dict):
 
         See GpgInfo.from_sequence.
         """
-        return cls.from_sequence(file(target), *args, **kwargs)
+        with open(target, 'rb') as target_file:
+            return cls.from_sequence(target_file, *args, **kwargs)
 
 
 class PkgRelation(object):
@@ -821,14 +905,14 @@ class PkgRelation(object):
                     d['arch'] = parse_archs(parts['archs'])
                 return d
             else:
-                print >> sys.stderr, \
-                        'deb822.py: WARNING: cannot parse package' \
-                        ' relationship "%s", returning it raw' % raw
+                print('deb822.py: WARNING: cannot parse package' \
+                      ' relationship "%s", returning it raw' % raw,
+                      file=sys.stderr)
                 return { 'name': raw, 'version': None, 'arch': None }
 
         tl_deps = cls.__comma_sep_RE.split(raw.strip()) # top-level deps
         cnf = map(cls.__pipe_sep_RE.split, tl_deps)
-        return map(lambda or_deps: map(parse_rel, or_deps), cnf)
+        return [[parse_rel(or_dep) for or_dep in or_deps] for or_deps in cnf]
 
     @staticmethod
     def str(rels):
@@ -846,14 +930,14 @@ class PkgRelation(object):
 
         def pp_atomic_dep(dep):
             s = dep['name']
-            if dep.has_key('version') and dep['version'] is not None:
+            if dep.get('version') is not None:
                 s += ' (%s %s)' % dep['version']
-            if dep.has_key('arch') and dep['arch'] is not None:
-                s += ' [%s]' % string.join(map(pp_arch, dep['arch']))
+            if dep.get('arch') is not None:
+                s += ' [%s]' % ' '.join(map(pp_arch, dep['arch']))
             return s
 
-        pp_or_dep = lambda deps: string.join(map(pp_atomic_dep, deps), ' | ')
-        return string.join(map(pp_or_dep, rels), ', ')
+        pp_or_dep = lambda deps: ' | '.join(map(pp_atomic_dep, deps))
+        return ', '.join(map(pp_or_dep, rels))
 
 
 class _lowercase_dict(dict):
@@ -894,7 +978,7 @@ class _PkgRelationMixin(object):
             # name) of Deb822 objects on the dictionary returned by the
             # relations property.
             keyname = name.lower()
-            if self.has_key(name):
+            if name in self:
                 self.__relations[keyname] = None   # lazy value
                     # all lazy values will be expanded before setting
                     # __parsed_relations to True
@@ -994,7 +1078,7 @@ class _multivalued(Deb822):
     def get_as_string(self, key):
         keyl = key.lower()
         if keyl in self._multivalued_fields:
-            fd = StringIO.StringIO()
+            fd = StringIO()
             if hasattr(self[key], 'keys'): # single-line
                 array = [ self[key] ]
             else: # multi-line
@@ -1008,7 +1092,7 @@ class _multivalued(Deb822):
                 field_lengths = {}
             for item in array:
                 for x in order:
-                    raw_value = unicode(item[x])
+                    raw_value = six.text_type(item[x])
                     try:
                         length = field_lengths[keyl][x]
                     except KeyError:
@@ -1044,8 +1128,14 @@ class _gpg_multivalued(_multivalued):
             sequence = kwargs.get("sequence", None)
 
         if sequence is not None:
-            if isinstance(sequence, basestring):
+            if isinstance(sequence, bytes):
                 self.raw_text = sequence
+            elif isinstance(sequence, six.string_types):
+                # If the file is really in some other encoding, then this
+                # probably won't verify correctly, but this is the best we
+                # can reasonably manage.  For accurate verification, the
+                # file should be opened in binary mode.
+                self.raw_text = sequence.encode('utf-8')
             elif hasattr(sequence, "items"):
                 # sequence is actually a dict(-like) object, so we don't have
                 # the raw text.
@@ -1058,12 +1148,12 @@ class _gpg_multivalued(_multivalued):
                     # Empty input
                     gpg_pre_lines = lines = gpg_post_lines = []
                 if gpg_pre_lines and gpg_post_lines:
-                    raw_text = StringIO.StringIO()
-                    raw_text.write("\n".join(gpg_pre_lines))
-                    raw_text.write("\n\n")
-                    raw_text.write("\n".join(lines))
-                    raw_text.write("\n\n")
-                    raw_text.write("\n".join(gpg_post_lines))
+                    raw_text = BytesIO()
+                    raw_text.write(b"\n".join(gpg_pre_lines))
+                    raw_text.write(b"\n\n")
+                    raw_text.write(b"\n".join(lines))
+                    raw_text.write(b"\n\n")
+                    raw_text.write(b"\n".join(gpg_post_lines))
                     self.raw_text = raw_text.getvalue()
                 try:
                     args = list(args)

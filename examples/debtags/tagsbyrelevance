@@ -18,12 +18,14 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
+from __future__ import print_function
+
 import sys
 import re
 from debian import debtags
 
 if len(sys.argv) < 2:
-	print sys.stderr, "Usage: %s tagdb [packagelist]" % (sys.argv[0])
+	print("Usage: %s tagdb [packagelist]" % (sys.argv[0]), file=sys.stderr)
 	sys.exit(1)
 
 full = debtags.DB()
@@ -48,5 +50,5 @@ tags = sorted(sub.iter_tags(), lambda a, b: cmp(rel_index(a), rel_index(b)))
 
 ## And finally print them
 for tag in tags:
-	print tag
-	#print tag, sub.card(tag), full.card(tag), float(sub.card(tag)) / float(full.card(tag))
+	print(tag)
+	#print(tag, sub.card(tag), full.card(tag), float(sub.card(tag)) / float(full.card(tag)))

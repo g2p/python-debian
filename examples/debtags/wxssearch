@@ -18,6 +18,8 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
+from __future__ import print_function
+
 import wx
 import wx.html
 import wx.lib.dialogs
@@ -73,9 +75,9 @@ class Model(wx.EvtHandler):
         # Compute the most interesting tags by discriminance
         self.discriminant = sorted(self.subcoll.iter_tags(), \
                   lambda b, a: cmp(self.subcoll.discriminance(a), self.subcoll.discriminance(b)))
-        #print "-----------------------------"
+        #print("-----------------------------")
         #for d in self.discriminant:
-        #    print d, self.subcoll.discriminance(d)
+        #    print(d, self.subcoll.discriminance(d))
 
         # Notify the change
         e = Model.ModelEvent(Model.wxEVT_CHANGED)
@@ -168,7 +170,7 @@ class TagList(wx.html.HtmlWindow):
         self.ProcessEvent(e)
 
     def model_changed(self, event):
-        #print "TLMC"
+        #print("TLMC")
         self.SetPage("<html><body>")
         first = True
 
@@ -248,7 +250,6 @@ class Results(wx.ListCtrl):
 
     def model_changed(self, event):
         self.packages = sorted(self.model.subcoll.iter_packages())
-        self.packages.sort()
         self.SetItemCount(len(self.packages))
         self.resize_columns()
         event.Skip()
@@ -382,12 +383,12 @@ class SearchWindow(wx.Frame):
         if action == 'add':
             self.model.add_wanted(tag)
         elif action == 'addnot':
-            print "wanted_event -> addnot"
+            print("wanted_event -> addnot")
             self.model.add_unwanted(tag)
         elif action == 'del':
             self.model.remove_tag_from_filter(tag)
         else:
-            print "Unknown action", action
+            print("Unknown action", action)
 
     def go_button_pressed(self, event):
         self.model.set_query(self.query.GetValue())

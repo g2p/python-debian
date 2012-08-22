@@ -47,7 +47,7 @@ Here is a list of the types deb822 knows about:
 Input
 =====
 
-Deb822 objects are normally initialized from a file() object, from which
+Deb822 objects are normally initialized from a file object, from which
 at most one paragraph is read, or a string.
 
 Alternatively, any sequence that returns one line of input at a time may
@@ -63,10 +63,9 @@ All classes provide an "iter_paragraphs" class method to easily go over
 each stanza in a file with multiple entries, like a Packages.gz file.
 For example:
 
-    f = file('/mirror/debian/dists/sid/main/binary-i386/Sources') 
-
-    for src in Sources.iter_paragraphs(f):
-	print src['Package'], src['Version']
+    with open('/mirror/debian/dists/sid/main/binary-i386/Sources') as f:
+        for src in Sources.iter_paragraphs(f):
+            print src['Package'], src['Version']
 
 This method uses python-apt if available to parse the file, since it
 significantly boosts performance. The downside, though, is that yielded
@@ -80,7 +79,8 @@ Sample usage (TODO: Improve)
 
    import deb822 
 
-   d = deb822.dsc(file('foo_1.1.dsc'))
+   with open('foo_1.1.dsc') as f:
+       d = deb822.Dsc(f)
    source = d['Source']
    version = d['Version']
 

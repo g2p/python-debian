@@ -15,12 +15,15 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import absolute_import, print_function
+
 import gzip
 import tarfile
+import sys
 
-from arfile import ArFile, ArError
-from changelog import Changelog
-from deb822 import Deb822
+from debian.arfile import ArFile, ArError
+from debian.changelog import Changelog
+from debian.deb822 import Deb822
 
 DATA_PART = 'data.tar'      # w/o extension
 CTRL_PART = 'control.tar'
@@ -105,20 +108,42 @@ class DebPart(object):
         return (('./' + fname in names) \
                 or (fname in names)) # XXX python << 2.5 TarFile compatibility
 
-    def get_file(self, fname):
-        """Return a file object corresponding to a given file name."""
+    def get_file(self, fname, encoding=None, errors=None):
+        """Return a file object corresponding to a given file name.
+
+        If encoding is given, then the file object will return Unicode data;
+        otherwise, it will return binary data.
+        """
 
         fname = DebPart.__normalize_member(fname)
         try:
-            return (self.tgz().extractfile('./' + fname))
+            fobj = self.tgz().extractfile('./' + fname)
         except KeyError:    # XXX python << 2.5 TarFile compatibility
-            return (self.tgz().extractfile(fname))
+            fobj = self.tgz().extractfile(fname)
+        if encoding is not None:
+            if sys.version >= '3':
+                import io
+                if not hasattr(fobj, 'flush'):
+                    # XXX http://bugs.python.org/issue13815
+                    fobj.flush = lambda: None
+                return io.TextIOWrapper(fobj, encoding=encoding, errors=errors)
+            else:
+                import codecs
+                if errors is None:
+                    errors = 'strict'
+                return codecs.EncodedFile(fobj, encoding, errors=errors)
+        else:
+            return fobj
 
-    def get_content(self, fname):
+    def get_content(self, fname, encoding=None, errors=None):
         """Return the string content of a given file, or None (e.g. for
-        directories)."""
+        directories).
 
-        f = self.get_file(fname)
+        If encoding is given, then the content will be a Unicode object;
+        otherwise, it will contain binary data.
+        """
+
+        f = self.get_file(fname, encoding=encoding, errors=errors)
         content = None
         if f:   # can be None for non regular or link files
             content = f.read()
@@ -133,11 +158,15 @@ class DebPart(object):
     def __contains__(self, fname):
         return self.has_file(fname)
 
-    def has_key(self, fname):
-        return self.has_file(fname)
+    if sys.version < '3':
+        def has_key(self, fname):
+            return self.has_file(fname)
 
     def __getitem__(self, fname):
         return self.get_content(fname)
+
+    def close(self):
+        self.__member.close()
 
 
 class DebData(DebPart):
@@ -167,24 +196,34 @@ class DebControl(DebPart):
 
         return Deb822(self.get_content(CONTROL_FILE))
 
-    def md5sums(self):
+    def md5sums(self, encoding=None, errors=None):
         """ Return a dictionary mapping filenames (of the data part) to
         md5sums. Fails if the control part does not contain a 'md5sum' file.
 
         Keys of the returned dictionary are the left-hand side values of lines
         in the md5sums member of control.tar.gz, usually file names relative to
-        the file system root (without heading '/' or './'). """
+        the file system root (without heading '/' or './').
+
+        The returned keys are Unicode objects if an encoding is specified,
+        otherwise binary. The returned values are always Unicode."""
 
         if not self.has_file(MD5_FILE):
             raise DebError("'%s' file not found, can't list MD5 sums" %
                     MD5_FILE)
 
-        md5_file = self.get_file(MD5_FILE)
+        md5_file = self.get_file(MD5_FILE, encoding=encoding, errors=errors)
         sums = {}
+        if encoding is None:
+            newline = b'\r\n'
+        else:
+            newline = '\r\n'
         for line in md5_file.readlines():
             # we need to support spaces in filenames, .split() is not enough
-            md5, fname = line.rstrip('\r\n').split(None, 1)
-            sums[fname] = md5
+            md5, fname = line.rstrip(newline).split(None, 1)
+            if sys.version >= '3' and isinstance(md5, bytes):
+                sums[fname] = md5.decode()
+            else:
+                sums[fname] = md5
         md5_file.close()
         return sums
 
@@ -253,9 +292,9 @@ class DebFile(ArFile):
         """ See .control.scripts() """
         return self.control.scripts()
 
-    def md5sums(self):
+    def md5sums(self, encoding=None, errors=None):
         """ See .control.md5sums() """
-        return self.control.md5sums()
+        return self.control.md5sums(encoding=encoding, errors=errors)
 
     def changelog(self):
         """ Return a Changelog object for the changelog.Debian.gz of the
@@ -273,10 +312,14 @@ class DebFile(ArFile):
                 return Changelog(raw_changelog)
         return None
 
+    def close(self):
+        self.control.close()
+        self.data.close()
+
 
 if __name__ == '__main__':
     import sys
     deb = DebFile(filename=sys.argv[1])
     tgz = deb.control.tgz()
-    print tgz.getmember('control')
+    print(tgz.getmember('control'))
 

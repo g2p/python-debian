@@ -24,12 +24,25 @@
 # Copyright 2005 Frank Lichtenheld <frank@lichtenheld.de>
 # and licensed under the same license as above.
 
+from __future__ import absolute_import
+
 import sys
 import unittest
 
-sys.path.insert(0, '../lib/debian/')
+import six
 
-import changelog
+sys.path.insert(0, '../lib/')
+
+from debian import changelog
+
+
+def open_utf8(filename, mode='r'):
+    """Open a UTF-8 text file in text mode."""
+    if sys.version < '3':
+        return open(filename, mode=mode)
+    else:
+        return open(filename, mode=mode, encoding='UTF-8')
+
 
 class ChangelogTests(unittest.TestCase):
 
@@ -184,51 +197,52 @@ class ChangelogTests(unittest.TestCase):
             self.assertEqual(str(c), cl_data)
 
     def test_utf8_encoded_file_input(self):
-        f = open('test_changelog_unicode')
+        f = open_utf8('test_changelog_unicode')
         c = changelog.Changelog(f)
         f.close()
-        u = unicode(c)
-        expected_u = u"""haskell-src-exts (1.8.2-3) unstable; urgency=low
+        u = six.text_type(c)
+        expected_u = six.u("""haskell-src-exts (1.8.2-3) unstable; urgency=low
 
   * control: Use versioned Replaces: and Conflicts:
 
- -- Marco Túlio Gontijo e Silva <marcot@debian.org>  Wed, 05 May 2010 18:01:53 -0300
+ -- Marco T\xfalio Gontijo e Silva <marcot@debian.org>  Wed, 05 May 2010 18:01:53 -0300
 
 haskell-src-exts (1.8.2-2) unstable; urgency=low
 
   * debian/control: Rename -doc package.
 
- -- Marco Túlio Gontijo e Silva <marcot@debian.org>  Tue, 16 Mar 2010 10:59:48 -0300
-"""
+ -- Marco T\xfalio Gontijo e Silva <marcot@debian.org>  Tue, 16 Mar 2010 10:59:48 -0300
+""")
         self.assertEqual(u, expected_u)
-        self.assertEquals(str(c), u.encode('utf-8'))
+        self.assertEqual(bytes(c), u.encode('utf-8'))
 
     def test_unicode_object_input(self):
-        f = open('test_changelog_unicode')
-        c_str = f.read()
+        f = open('test_changelog_unicode', 'rb')
+        c_bytes = f.read()
         f.close()
-        c_unicode = c_str.decode('utf-8')
+        c_unicode = c_bytes.decode('utf-8')
         c = changelog.Changelog(c_unicode)
-        self.assertEqual(unicode(c), c_unicode)
-        self.assertEqual(str(c), c_str)
+        self.assertEqual(six.text_type(c), c_unicode)
+        self.assertEqual(bytes(c), c_bytes)
 
     def test_non_utf8_encoding(self):
-        f = open('test_changelog_unicode')
-        c_str = f.read()
+        f = open('test_changelog_unicode', 'rb')
+        c_bytes = f.read()
         f.close()
-        c_unicode = c_str.decode('utf-8')
+        c_unicode = c_bytes.decode('utf-8')
         c_latin1_str = c_unicode.encode('latin1')
         c = changelog.Changelog(c_latin1_str, encoding='latin1')
-        self.assertEqual(unicode(c), c_unicode)
-        self.assertEqual(str(c), c_latin1_str)
+        self.assertEqual(six.text_type(c), c_unicode)
+        self.assertEqual(bytes(c), c_latin1_str)
         for block in c:
-            self.assertEqual(str(block), unicode(block).encode('latin1'))
+            self.assertEqual(bytes(block),
+                             six.text_type(block).encode('latin1'))
 
     def test_block_iterator(self):
         f = open('test_changelog')
         c = changelog.Changelog(f)
         f.close()
-        self.assertEqual(map(str, c._blocks), map(str, c))
+        self.assertEqual([str(b) for b in c._blocks], [str(b) for b in c])
 
     def test_len(self):
         f = open('test_changelog')
