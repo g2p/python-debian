@@ -270,7 +270,10 @@ class Deb822Dict(_mutable_mapping_mixin, object):
     def __contains__(self, key):
         key = _strI(key)
         return key in self.__keys
-    
+
+    if sys.version < '3':
+        has_key = __contains__
+
     ### END _mutable_mapping_mixin methods
 
     def __repr__(self):

@@ -1,3 +1,11 @@
+python-debian (0.1.21+nmu2) unstable; urgency=low
+
+  * Non-maintainer upload.
+  * In Python 2, restore Deb822Dict.has_key method for compatibility.
+    (Closes: #686731)
+
+ -- Colin Watson <cjwatson@debian.org>  Wed, 05 Sep 2012 11:28:58 +0100
+
 python-debian (0.1.21+nmu1) unstable; urgency=low
 
   * Non-maintainer upload.
